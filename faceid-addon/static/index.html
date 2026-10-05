@@ -459,24 +459,33 @@ function mintTrackName(label){
   }
   return `${base}-${Date.now().toString(16).slice(-6)}`;
 }
+let assignInFlight=false;
 async function assignCluster(i){
+  if(assignInFlight)return;
   const person=$(`#new${i}`).value.trim()||$(`#sel${i}`).value;
   if(!person)return toast('Pick a person or enter a name');
   const box=document.querySelector(`.cluster[data-i="${i}"]`);
   const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
   const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
-  const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ids,person})});
-  toast(`${r.assigned} face(s) → ${person}`);render();
+  assignInFlight=true;
+  try{
+    const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids,person})});
+    toast(`${r.assigned} face(s) → ${person}`);render();
+  }finally{assignInFlight=false}
 }
 async function trackAsNew(i){
+  if(assignInFlight)return;
   const person=mintTrackName($(`#new${i}`).value);
   const box=document.querySelector(`.cluster[data-i="${i}"]`);
   const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
   const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
-  const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ids,person})});
-  toast(`${r.assigned} face(s) → ${person}`);render();
+  assignInFlight=true;
+  try{
+    const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids,person})});
+    toast(`${r.assigned} face(s) → ${person}`);render();
+  }finally{assignInFlight=false}
 }
 function showFull(url,cap,fallback){const im=$('#lbimg');
   im.onerror=fallback?()=>{im.onerror=null;im.src=fallback;$('#lbcap').textContent=(cap||'')+' · full snapshot expired, showing face crop'}:null;
