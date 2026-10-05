@@ -295,8 +295,9 @@ async function renderUnknowns(){
         ${c[0].guess?`<span class="guess">looks like ${esc(c[0].guess)} (${(c[0].guess_score*100|0)}%)</span>`:''}
         <span style="flex:1"></span>
         <select id="sel${i}" title="assign to an existing person"><option value="">— pick person —</option>${personOptions(gslug)}</select>
-        <input id="new${i}" placeholder="…or new name" size="14" title="or create a new person with this name">
+        <input id="new${i}" placeholder="…or new name / Track as new label" size="18" title="ASSIGN uses this exact name; Track as new appends a unique -xxxxxx (empty → Unnamed-xxxxxx)">
         <button class="act" title="assign selected tiles (or the whole cluster) to the chosen person" onclick="assignCluster(${i})">ASSIGN</button>
+        <button class="act" title="Create a new person; optional label becomes Label-xxxxxx (empty → Unnamed-xxxxxx)" onclick="trackAsNew(${i})">Track as new</button>
         <button class="ghost" style="color:var(--warn);border-color:var(--warn)" onclick="ignoreCluster(${i})" title="never notify, match or resurface these faces">ignore</button>
         <button class="ghost" title="delete garbage crops permanently — does NOT stop future matching; use ignore for people" onclick="discardCluster(${i})">discard</button>
       </div>
@@ -447,9 +448,29 @@ async function deleteIgnored(id){
     body:JSON.stringify({ids:[id],person:'-'})});
   render();
 }
+function mintTrackName(label){
+  const base=(label||'').trim().replace(/\s+/g,' ')||'Unnamed';
+  const taken=new Set(Object.values(persons).map(p=>p.name.normalize('NFKC').trim().toLowerCase()));
+  for(let n=0;n<32;n++){
+    const b=new Uint8Array(3); crypto.getRandomValues(b);
+    const id=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');
+    const name=`${base}-${id}`;
+    if(!taken.has(name.normalize('NFKC').trim().toLowerCase())) return name;
+  }
+  return `${base}-${Date.now().toString(16).slice(-6)}`;
+}
 async function assignCluster(i){
   const person=$(`#new${i}`).value.trim()||$(`#sel${i}`).value;
   if(!person)return toast('Pick a person or enter a name');
+  const box=document.querySelector(`.cluster[data-i="${i}"]`);
+  const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
+  const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
+  const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids,person})});
+  toast(`${r.assigned} face(s) → ${person}`);render();
+}
+async function trackAsNew(i){
+  const person=mintTrackName($(`#new${i}`).value);
   const box=document.querySelector(`.cluster[data-i="${i}"]`);
   const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
   const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
