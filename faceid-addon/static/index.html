@@ -295,7 +295,7 @@ async function renderUnknowns(){
         ${c[0].guess?`<span class="guess">looks like ${esc(c[0].guess)} (${(c[0].guess_score*100|0)}%)</span>`:''}
         <span style="flex:1"></span>
         <select id="sel${i}" title="assign to an existing person"><option value="">— pick person —</option>${personOptions(gslug)}</select>
-        <input id="new${i}" placeholder="…or new name / Track as new label" size="18" title="ASSIGN uses this exact name; Track as new appends a unique -xxxxxx (empty → Unnamed-xxxxxx)">
+        <input id="new${i}" placeholder="…exact name, or Track as new label" size="18" title="ASSIGN: exact new name only (not with a dropdown pick). Track as new: optional role label → Label-xxxxxx (empty → Unnamed-xxxxxx)">
         <button class="act" title="assign selected tiles (or the whole cluster) to the chosen person" onclick="assignCluster(${i})">ASSIGN</button>
         <button class="act" title="Create a new person; optional label becomes Label-xxxxxx (empty → Unnamed-xxxxxx)" onclick="trackAsNew(${i})">Track as new</button>
         <button class="ghost" style="color:var(--warn);border-color:var(--warn)" onclick="ignoreCluster(${i})" title="never notify, match or resurface these faces">ignore</button>
@@ -451,18 +451,24 @@ async function deleteIgnored(id){
 function mintTrackName(label){
   const base=(label||'').trim().replace(/\s+/g,' ')||'Unnamed';
   const taken=new Set(Object.values(persons).map(p=>p.name.normalize('NFKC').trim().toLowerCase()));
-  for(let n=0;n<32;n++){
+  const key=n=>n.normalize('NFKC').trim().toLowerCase();
+  for(let n=0;n<64;n++){
     const b=new Uint8Array(3); crypto.getRandomValues(b);
     const id=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');
     const name=`${base}-${id}`;
-    if(!taken.has(name.normalize('NFKC').trim().toLowerCase())) return name;
+    if(!taken.has(key(name))) return name;
   }
-  return `${base}-${Date.now().toString(16).slice(-6)}`;
+  for(let n=2;;n++){
+    const name=`${base}-${Date.now().toString(16)}-${n}`;
+    if(!taken.has(key(name))) return name;
+  }
 }
 let assignInFlight=false;
 async function assignCluster(i){
   if(assignInFlight)return;
-  const person=$(`#new${i}`).value.trim()||$(`#sel${i}`).value;
+  const typed=$(`#new${i}`).value.trim(), picked=$(`#sel${i}`).value;
+  if(typed && picked)return toast('Clear the name field or the person dropdown — not both');
+  const person=typed||picked;
   if(!person)return toast('Pick a person or enter a name');
   const box=document.querySelector(`.cluster[data-i="${i}"]`);
   const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
@@ -476,6 +482,7 @@ async function assignCluster(i){
 }
 async function trackAsNew(i){
   if(assignInFlight)return;
+  if($(`#sel${i}`).value)return toast('Clear the person dropdown before Track as new');
   const person=mintTrackName($(`#new${i}`).value);
   const box=document.querySelector(`.cluster[data-i="${i}"]`);
   const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
