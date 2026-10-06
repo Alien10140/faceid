@@ -109,6 +109,36 @@ if [ "${FOLDER_ENABLED}" = "true" ] && [ ! -d "${FOLDER_PATH}" ]; then
     bashio::log.warning "folder_path '${FOLDER_PATH}' does not exist inside the add-on."
     bashio::log.warning "Only /media and /share are mounted; /config and host paths are not visible."
 fi
+# Backup-Ziel einmal beim Start pruefen. /media ist read-only gemountet, und ein
+# gescheitertes Backup faellt sonst erst beim Wiederherstellen auf.
+# /data und /share ueberleben Neustart und Update, alles andere im Container nicht.
+# Der Dienst prueft backup_dir gegen diese Liste, damit ein Tippfehler nicht im
+# Overlay landet und beim naechsten Update verschwindet.
+export FACEID_PERSISTENT_ROOTS="/data:/share"
+BACKUP_DIR=$(cfg '.backup_dir')
+if [ -n "${BACKUP_DIR}" ]; then
+    case "${BACKUP_DIR}" in
+        /share/*|/share|/data/*|/data) : ;;
+        *)
+            bashio::log.fatal "backup_dir '${BACKUP_DIR}' is outside the mounts that survive an update."
+            bashio::log.fatal "Use a path under /share (e.g. /share/faceid). /media is mounted read-only."
+            exit 1
+            ;;
+    esac
+    if ! mkdir -p "${BACKUP_DIR}" 2>/dev/null; then
+        bashio::log.fatal "backup_dir '${BACKUP_DIR}' cannot be created."
+        bashio::log.fatal "Only /media (read-only) and /share (writable) are mounted — use /share/faceid."
+        exit 1
+    fi
+    if ! touch "${BACKUP_DIR}/.faceid-write-test" 2>/dev/null; then
+        bashio::log.fatal "backup_dir '${BACKUP_DIR}' is not writable."
+        bashio::log.fatal "/media is mounted read-only; put the backup under /share (e.g. /share/faceid)."
+        exit 1
+    fi
+    rm -f "${BACKUP_DIR}/.faceid-write-test"
+    bashio::log.info "Gallery backups go to ${BACKUP_DIR}"
+fi
+
 if [ -z "${FRIGATE_URL}" ]; then
     bashio::log.info "No frigate_url set — running on the folder input alone."
 fi
@@ -149,6 +179,7 @@ faceid:
   backup_enabled: $(cfg '.backup_enabled')
   backup_hour: $(cfg '.backup_hour')
   backup_keep: $(cfg '.backup_keep')
+  backup_dir: $(yml '.backup_dir')
   presence_window: $(cfg '.presence_window')
   cross_risk_margin: $(cfg '.cross_risk_margin')
   self_outlier_ratio: $(cfg '.self_outlier_ratio')

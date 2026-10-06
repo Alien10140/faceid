@@ -43,6 +43,7 @@ Full documentation: https://github.com/SkyTechNerds/faceid
 | `frigate_topic_prefix` | must match `mqtt.topic_prefix` in Frigate's own config (default `frigate`). Wrong value = FaceID hears nothing at all |
 | `poll_interval` | seconds; >0 also polls Frigate's event API for events MQTT never announces (e.g. events created by an automation from a camera's own detection). 0 = off |
 | `backup_enabled` / `backup_hour` / `backup_keep` | optional built-in daily gallery backup |
+| `backup_dir` | where that backup is written. Empty = inside the app's data volume. Set `/share/faceid` to put it where Home Assistant's own backups will pick it up. The path is write-tested at start-up and when you save it in Settings — `/media` is mounted read-only, so a backup target under it is refused instead of failing every night |
 | `cross_risk_margin` | how close two people's references may get before one is set aside (relative to `match_threshold`; 0 or below = off) |
 | `self_outlier_ratio` | sets aside a reference photo that fits its own person far worse than the rest (0 = off) |
 | `history_keep` | how many recognitions the History tab keeps (0 = history off) |
@@ -94,5 +95,19 @@ mean of that many best-fitting reference photos. Higher resists a single lucky p
 lower helps people whose references cover many different angles, since their own less
 similar photos otherwise drag the mean down.
 
+## Backups
+
 Face data (gallery, review queue) is stored in the app's data volume and survives
 updates. Uninstalling the app deletes it.
+
+The recognition model cache is **excluded from Home Assistant backups** — roughly 600 MB
+that re-downloads by itself on the next start. Nothing in it can be lost.
+
+The gallery is the one thing that cannot be re-created. Set `backup_dir` to `/share/faceid`
+and switch on `backup_enabled`: the daily archive then lands where Home Assistant's own
+backups already look, at a few MB.
+
+⚠️ **The app image is still stored in every backup** (~1.4 GB), because the app is built
+locally on your machine rather than pulled from a registry. Excluding it is not possible
+from here — that needs prebuilt images, tracked in
+[#33](https://github.com/SkyTechNerds/faceid/issues/33).

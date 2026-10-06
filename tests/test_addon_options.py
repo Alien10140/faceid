@@ -46,10 +46,19 @@ class SchemaCoverageTests(unittest.TestCase):
 
 
 class FolderModeTests(unittest.TestCase):
-    def test_media_and_share_are_mapped_read_only(self):
-        # Ohne die Einhaengung sieht die App den Ordner nicht, egal wie er konfiguriert
-        # ist. Lesend genuegt: FaceID veraendert die Aufnahmen nie.
-        self.assertEqual(sorted(CONFIG.get("map") or []), ["media:ro", "share:ro"])
+    def test_media_and_share_are_mapped(self):
+        # Ohne die Einhaengung sieht die App den Ordner nicht, egal wie er konfiguriert ist.
+        self.assertEqual(sorted(CONFIG.get("map") or []), ["media:ro", "share:rw"])
+
+    def test_the_watched_root_stays_read_only(self):
+        # media ist die Quelle: FaceID darf Aufnahmen nie veraendern oder loeschen.
+        # share ist Ziel des Galerie-Backups und deshalb als einziges schreibbar.
+        self.assertIn("media:ro", CONFIG["map"])
+        self.assertNotIn("media:rw", CONFIG["map"])
+
+    def test_the_model_cache_is_excluded_from_backups(self):
+        # Rund 600 MB, die sich beim naechsten Start von selbst neu laden.
+        self.assertIn("model-cache", CONFIG.get("backup_exclude") or [])
 
     def test_the_generated_config_has_a_folder_block(self):
         self.assertRegex(TEMPLATE, r"(?m)^folder:$")
@@ -90,3 +99,23 @@ class FreeTextEscapingTests(unittest.TestCase):
                and CONFIG["schema"][k].rstrip("?") in {"str", "url", "password"}
                and f"cfg '.{k}'" in TEMPLATE}
         self.assertEqual(raw, set(), f"roh statt ueber yml(): {sorted(raw)}")
+
+
+class BackupDirValidationTests(unittest.TestCase):
+    """Ein Backup-Ziel, das nicht beschreibbar ist, muss beim Start auffallen."""
+
+    def test_run_sh_probes_the_backup_dir(self):
+        self.assertIn('BACKUP_DIR=$(cfg \'.backup_dir\')', RUN_SH)
+        self.assertIn(".faceid-write-test", RUN_SH,
+                      "run.sh muss echt hineinschreiben, nicht nur -d pruefen")
+
+    def test_run_sh_names_the_writable_mount(self):
+        block = RUN_SH.split("BACKUP_DIR=", 1)[1].split("if [ -z \"${FRIGATE_URL}\"", 1)[0]
+        self.assertIn("/share", block, "Die Fehlermeldung muss den Ausweg nennen")
+        self.assertIn("read-only", block)
+
+    def test_run_sh_restricts_the_backup_dir_to_persistent_mounts(self):
+        self.assertIn('export FACEID_PERSISTENT_ROOTS="/data:/share"', RUN_SH)
+        block = RUN_SH.split("BACKUP_DIR=", 1)[1].split('if [ -z "${FRIGATE_URL}"', 1)[0]
+        self.assertIn("/share/*|/share|/data/*|/data", block,
+                      "Ein Pfad im Overlay muss schon beim Start auffallen")
