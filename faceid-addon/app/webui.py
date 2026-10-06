@@ -275,6 +275,11 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     def assign(body: AssignBody):
         persons_now = gallery.persons()
         slug = body.person if body.person in persons_now else gallery.create_person(body.person)
+        # Am aufgeloesten Slug entscheiden, nicht an der Eingabe: create_person ist
+        # absichtlich idempotent und gibt zu "Juli", "juli " oder einem zweiten Tab
+        # denselben vorhandenen Slug zurueck. Wer hier die Eingabe prueft, loescht
+        # bei null Treffern eine bestehende Person samt ihrer Gesichter.
+        created_now = slug not in persons_now
         name = gallery.persons()[slug]["name"]
         n = 0
         for uid in body.ids:
@@ -290,6 +295,18 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
                 # Zuordnung ans Original-Event zurückspielen (Mensch bestätigt -> Score 1.0)
                 if getattr(processor.frigate, "enabled", True) and meta.get("event_id"):
                     processor.frigate.set_sub_label(meta["event_id"], name, 1.0)
+        if n == 0:
+            # Kein Gesicht gelandet heisst: veraltete IDs, leere Auswahl, oder ein
+            # zweiter Tab war schneller. Das war bisher ein HTTP 200 mit
+            # {"assigned": 0} — die Oberflaeche meldete "0 face(s) → Name" und sah aus
+            # wie Erfolg. Wurde die Person fuer genau diesen Aufruf angelegt, gehoert
+            # sie wieder weg: sonst haeuft jeder Fehlversuch ueber "Track as new" ein
+            # leeres Unnamed-xxxxxx in der Galerie an, das niemand zuordnen kann.
+            # Eine vorhandene Person wird nie geloescht.
+            if created_now:
+                gallery.delete_person(slug)
+                raise HTTPException(409, f"no face was assigned — {name} was not created")
+            raise HTTPException(409, "no face was assigned — the queue may have changed")
         gallery.refresh_guesses()
         return {"assigned": n, "slug": slug}
 

@@ -82,7 +82,23 @@ h2{font:600 12px var(--mono);color:var(--dim);text-transform:uppercase;letter-sp
   padding:5px 12px;cursor:pointer;display:inline-block;line-height:1.35;text-decoration:none;vertical-align:middle}
 .ghost,button.ghost{background:none;border:1px solid var(--line);color:var(--dim);font:12px var(--mono);
   padding:4px 10px;cursor:pointer;display:inline-block;line-height:1.35;text-decoration:none;vertical-align:middle}
-.ghost:hover,button.ghost:hover{color:var(--fg)}
+.ghost:hover,button.ghost:hover{color:var(--fg);border-color:var(--fg)}
+/* Zustaende der Handlungsknoepfe. Vorher hatte .act keinen einzigen: Zeigen,
+   Druecken und Tastaturfokus sahen identisch aus, obwohl ASSIGN und "Track as new"
+   Personen anlegen. Gemessen statt geschaetzt: Grundzustand zu Hover 1.66:1, Hover zu
+   Active 1.50:1 — unter etwa 1.5:1 sieht man den Wechsel nicht. Der dunkle Text bleibt
+   dabei ueber 4.5:1 (7.3:1 auf Hover, 4.9:1 auf Active). Der Fokusring liegt dank
+   outline-offset auf dem Panel und steht dort mit 13:1. */
+.act:hover,button.act:hover{background:oklch(70% .25 130)}
+.act:active,button.act:active{background:oklch(60% .20 130);transform:translateY(1px)}
+.ghost:active,button.ghost:active{background:color-mix(in oklab,var(--fg) 12%,transparent)}
+.act:focus-visible,button.act:focus-visible,.ghost:focus-visible,button.ghost:focus-visible{
+  outline:2px solid var(--fg);outline-offset:2px}
+.act[disabled],button.act[disabled],.ghost[disabled],button.ghost[disabled]{
+  opacity:.45;cursor:not-allowed}
+/* Die einzige Bewegung hier ist der 1px-Versatz beim Druecken — genau der gehoert
+   abgeschaltet. 'transition:none' waere wirkungslos gewesen: keine deklariert. */
+@media (prefers-reduced-motion:reduce){.act:active,button.act:active{transform:none}}
 /* Regler in der Akzentfarbe statt im Browser-Blau — das Blau war die einzige Farbe
    der Oberflaeche, die nicht aus der Palette stammte, und stand direkt neben den
    gruenen Zahlenwerten. Gilt zugleich fuer Ankreuzfelder. */
@@ -151,6 +167,18 @@ let tab='unknowns', persons={}, selected=new Set(), suggestThr=0.40;
 async function j(url,opt){const r=await fetch(url,opt);if(!r.ok)throw new Error(await r.text());return r.json()}
 // FastAPI verpackt den Grund in {"detail": ...} — ohne das Auspacken sieht der
 // Nutzer nur rohes JSON und weiss nicht, was an seiner Eingabe falsch war.
+// Netzwerk- und Serverfehler sichtbar machen, statt sie zu verschlucken. Die
+// Handler rufen 'await j(...)' an 56 Stellen in 25 Funktionen auf, die meisten ohne
+// eigenes catch — ohne das hier bleibt ein fehlgeschlagener Klick ein stilles
+// Nichts. Ein Platz statt 25 verhindert, dass der naechste Handler es wieder vergisst.
+window.addEventListener('unhandledrejection', ev => {
+  // Erst in die Konsole, dann der Toast: preventDefault() unterdrueckt die
+  // Standardausgabe des Browsers, und ein TypeError waere sonst nur noch ein auf
+  // 120 Zeichen gekuerzter Hinweis ohne Stapel — schlechter als vorher.
+  console.error('unhandled rejection:', ev.reason);
+  toast('Failed: ' + errText(ev.reason).slice(0, 120));
+  ev.preventDefault();
+});
 function errText(e){const s=String(e&&e.message||e);try{const d=JSON.parse(s).detail;if(d)return String(d);}catch(_){}return s}
 function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}

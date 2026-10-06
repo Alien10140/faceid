@@ -3,6 +3,26 @@
 All notable changes to FaceID. The Home Assistant app shows this file in the
 update dialog; standalone users can watch GitHub releases.
 
+## 0.25.1 — 2026-10-06
+
+- **A failed assignment no longer leaves an empty person behind.** Assigning faces created
+  the person first and assigned afterwards, so when nothing could be assigned — stale ids, an
+  empty selection, or a second tab that got there first — the answer was HTTP 200 with
+  `{"assigned": 0}` and the person stayed. Through "Track as new" that meant an empty
+  `Unnamed-xxxxxx` in the gallery on every failed attempt, while the UI reported
+  `0 face(s) → Unnamed-ab12cd` and looked like success. It now answers 409 and removes a
+  person that was created for that very call; an existing person is never deleted, including
+  when its display name or a different casing was typed.
+- **The action buttons show what they are doing.** ASSIGN, ASSIGN ALL and "Track as new" had
+  no hover, pressed or keyboard-focus style at all. Measured: 1.66:1 from rest to hover,
+  1.50:1 from hover to pressed, with the label staying above 4.5:1 on both, and a focus ring
+  at 13:1 against the panel. Pressing also shifts by 1px, which `prefers-reduced-motion`
+  turns off.
+- **Failures are visible.** A click whose request failed used to do nothing and say nothing:
+  the request helper is awaited in 25 handlers, most without their own error handling. A
+  single listener now reports every one of them, and still logs the original error to the
+  console so a programming mistake keeps its stack trace.
+
 ## 0.25.0 — 2026-10-06
 
 - **Folder mode is available in the Home Assistant app.** The directory watcher has existed
