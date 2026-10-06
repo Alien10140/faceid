@@ -843,13 +843,14 @@ class EventProcessor:
             folder_cams = set()
             if fc.get("enabled"):
                 folder_cams = {str(fc.get("camera") or "").strip()} - {""}
+            # Vorrang wie bisher: ausdrueckliche Liste, sonst Discovery-Liste, sonst
+            # Frigate fragen. Die Ordner-Kamera kommt immer DAZU statt zu ersetzen —
+            # bei Frigate UND Ordner muessen beide Sensoren entstehen. Frigate wird nur
+            # gefragt, wenn es ueberhaupt an ist: der Aufruf geht ueber das Netz.
             cams = (set(self.cameras)
-                    or set(self.cfg["faceid"].get("discovery_cameras") or [])) | folder_cams
-            # Frigate erst fragen, wenn lokal nichts bekannt ist: der Aufruf geht ueber
-            # das Netz und kann bis zum Zeitlimit haengen. Im Ordnerbetrieb steht der
-            # Name schon fest, da waere jede Sekunde Wartezeit grundlos.
-            if not cams:
-                cams = self._frigate_cameras()
+                    or set(self.cfg["faceid"].get("discovery_cameras") or [])
+                    or (self._frigate_cameras() if self.frigate_enabled else set()))
+            cams = cams | folder_cams
             self._announced |= cams
             log.info("MQTT discovery: announced %d sensor(s)%s", len(cams),
                      "" if cams else " — cameras unknown, they follow on first recognition")
