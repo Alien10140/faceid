@@ -340,7 +340,9 @@ reference: [faceid-addon/DOCS.md](faceid-addon/DOCS.md).
    (CLI alternative: `venv/bin/python -m app.backfill --days 14`)
 2. **Assign clusters** in the UI (Unknown tab): pick a name per cluster — select individual
    tiles first if a cluster contains a stray face. The ⛶ button shows the full snapshot
-   for context.
+   for context. For recurring strangers you only know by role, use **Track as new**
+   (optional label → `Label-xxxxxx`, or `Unnamed-xxxxxx` if blank) so each enrollment
+   stays unique until you rename them on the Persons tab.
 3. Once a few people exist, use **"apply suggestions"** to bulk-assign everything the
    gallery already recognizes with ≥ 50 % similarity. Repeat as the gallery grows.
 4. Optionally upload 5–10 clear photos per person (Persons tab) as clean anchors. Photos
@@ -355,7 +357,8 @@ face, and the difference matters:
 
 | Action | Meaning |
 |---|---|
-| **Assign** | This is someone I track — recognize, notify, tag in Frigate |
+| **Assign** | This is someone I track — recognize, notify, tag in Frigate (exact name; reusing a name merges) |
+| **Track as new** | Same as Assign, but always a fresh person: optional role label + unique `-xxxxxx` (empty → `Unnamed-xxxxxx`) |
 | **Ignore** | I know who this is and never want to hear about them — silent forever |
 | **Discard** | Garbage crop (blurry, not a face) — delete, no memory kept |
 
