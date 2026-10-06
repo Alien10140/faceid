@@ -99,3 +99,17 @@ class FreeTextEscapingTests(unittest.TestCase):
                and CONFIG["schema"][k].rstrip("?") in {"str", "url", "password"}
                and f"cfg '.{k}'" in TEMPLATE}
         self.assertEqual(raw, set(), f"roh statt ueber yml(): {sorted(raw)}")
+
+
+class BackupDirValidationTests(unittest.TestCase):
+    """Ein Backup-Ziel, das nicht beschreibbar ist, muss beim Start auffallen."""
+
+    def test_run_sh_probes_the_backup_dir(self):
+        self.assertIn('BACKUP_DIR=$(cfg \'.backup_dir\')', RUN_SH)
+        self.assertIn(".faceid-write-test", RUN_SH,
+                      "run.sh muss echt hineinschreiben, nicht nur -d pruefen")
+
+    def test_run_sh_names_the_writable_mount(self):
+        block = RUN_SH.split("BACKUP_DIR=", 1)[1].split("if [ -z \"${FRIGATE_URL}\"", 1)[0]
+        self.assertIn("/share", block, "Die Fehlermeldung muss den Ausweg nennen")
+        self.assertIn("read-only", block)

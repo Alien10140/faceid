@@ -43,7 +43,7 @@ Full documentation: https://github.com/SkyTechNerds/faceid
 | `frigate_topic_prefix` | must match `mqtt.topic_prefix` in Frigate's own config (default `frigate`). Wrong value = FaceID hears nothing at all |
 | `poll_interval` | seconds; >0 also polls Frigate's event API for events MQTT never announces (e.g. events created by an automation from a camera's own detection). 0 = off |
 | `backup_enabled` / `backup_hour` / `backup_keep` | optional built-in daily gallery backup |
-| `backup_dir` | where that backup is written. Empty = inside the app's data volume. Set `/share/faceid` to put it where Home Assistant's own backups will pick it up |
+| `backup_dir` | where that backup is written. Empty = inside the app's data volume. Set `/share/faceid` to put it where Home Assistant's own backups will pick it up. The path is write-tested at start-up and when you save it in Settings — `/media` is mounted read-only, so a backup target under it is refused instead of failing every night |
 | `cross_risk_margin` | how close two people's references may get before one is set aside (relative to `match_threshold`; 0 or below = off) |
 | `self_outlier_ratio` | sets aside a reference photo that fits its own person far worse than the rest (0 = off) |
 | `history_keep` | how many recognitions the History tab keeps (0 = history off) |

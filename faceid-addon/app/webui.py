@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from . import logbuffer
 from .engine import FaceEngine, crop_face, find_face_padded
-from .backup_util import build_backup_gz, write_backup_file, prune_backups
+from .backup_util import build_backup_gz, write_backup_file, prune_backups, check_backup_dir
 from pathlib import Path as _P
 
 log = logging.getLogger("faceid.web")
@@ -549,6 +549,13 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
             if k in body:
                 try: updates[k] = min(max(int(body[k]), lo), hi)
                 except (TypeError, ValueError): raise HTTPException(400, f"{k} not an int")
+        # Backup-Ziel sofort pruefen, nicht erst nachts im Log: ein unbeschreibbarer
+        # Pfad (z.B. unter dem read-only /media des Addons) wuerde sonst stillschweigend
+        # jedes Backup verschlucken.
+        if updates.get("backup_dir"):
+            problem = check_backup_dir(updates["backup_dir"])
+            if problem:
+                raise HTTPException(400, f"backup_dir unusable: {problem}")
         trimmed, deferred = _apply_settings(updates)
         return {"ok": True, "applied": updates, "trimmed": trimmed, "deferred": deferred}
 
@@ -556,7 +563,11 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     def backup_now():
         f = cfg["faceid"]
         bdir = _P(f.get("backup_dir") or (data_dir / "backups"))
-        p = write_backup_file(data_dir, bdir)
+        try:
+            p = write_backup_file(data_dir, bdir)
+        except OSError as exc:
+            # Klartext statt HTTP 500 — der Pfad kommt aus den Einstellungen.
+            raise HTTPException(400, f"cannot write to {bdir}: {exc.strerror or exc}")
         prune_backups(bdir, int(f.get("backup_keep", 7)))
         return {"ok": True, "file": str(p)}
 

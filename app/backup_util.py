@@ -2,6 +2,7 @@
 import io
 import logging
 import tarfile
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -21,6 +22,32 @@ def build_backup_gz(data_dir: Path) -> bytes:
             if d.exists():
                 tar.add(d, arcname=sub)
     return buf.getvalue()
+
+
+def check_backup_dir(backup_dir) -> str | None:
+    """Pruefen, ob dort wirklich geschrieben werden kann. Fehlertext oder None.
+
+    Ein Backup-Ziel faellt sonst erst beim Wiederherstellen auf: der Scheduler
+    loggt den Fehler und laeuft weiter, und der Nutzer glaubt, er habe Backups.
+    Deshalb einmal echt hinschreiben statt os.access zu fragen — im HA-Addon
+    ist /media read-only gemountet, und das sieht man nur am Schreibversuch.
+    """
+    path = Path(str(backup_dir))
+    if not path.is_absolute():
+        return f"{path} is not an absolute path"
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return f"cannot create {path}: {exc.strerror or exc}"
+    if not path.is_dir():
+        return f"{path} is not a directory"
+    try:
+        probe = tempfile.NamedTemporaryFile(dir=path, prefix=".faceid-write-test-")
+        probe.write(b"faceid")
+        probe.close()
+    except OSError as exc:
+        return f"cannot write to {path}: {exc.strerror or exc}"
+    return None
 
 
 def write_backup_file(data_dir: Path, backup_dir: Path) -> Path:

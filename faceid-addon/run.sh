@@ -109,6 +109,24 @@ if [ "${FOLDER_ENABLED}" = "true" ] && [ ! -d "${FOLDER_PATH}" ]; then
     bashio::log.warning "folder_path '${FOLDER_PATH}' does not exist inside the add-on."
     bashio::log.warning "Only /media and /share are mounted; /config and host paths are not visible."
 fi
+# Backup-Ziel einmal beim Start pruefen. /media ist read-only gemountet, und ein
+# gescheitertes Backup faellt sonst erst beim Wiederherstellen auf.
+BACKUP_DIR=$(cfg '.backup_dir')
+if [ -n "${BACKUP_DIR}" ]; then
+    if ! mkdir -p "${BACKUP_DIR}" 2>/dev/null; then
+        bashio::log.fatal "backup_dir '${BACKUP_DIR}' cannot be created."
+        bashio::log.fatal "Only /media (read-only) and /share (writable) are mounted — use /share/faceid."
+        exit 1
+    fi
+    if ! touch "${BACKUP_DIR}/.faceid-write-test" 2>/dev/null; then
+        bashio::log.fatal "backup_dir '${BACKUP_DIR}' is not writable."
+        bashio::log.fatal "/media is mounted read-only; put the backup under /share (e.g. /share/faceid)."
+        exit 1
+    fi
+    rm -f "${BACKUP_DIR}/.faceid-write-test"
+    bashio::log.info "Gallery backups go to ${BACKUP_DIR}"
+fi
+
 if [ -z "${FRIGATE_URL}" ]; then
     bashio::log.info "No frigate_url set — running on the folder input alone."
 fi
