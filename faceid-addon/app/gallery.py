@@ -746,11 +746,13 @@ class Gallery:
     # ---------- Matching ----------
 
     def match(self, embedding: np.ndarray):
-        """-> (slug, name, score) der besten Person oder (None, None, best_score).
+        """-> (slug, name, score, top_photo) der besten Person oder (None, None, best_score, None).
         Score = Mittel der Top-k Ähnlichkeiten pro Person (statt Max) — eine Person
-        mit vielen Referenzbildern gewinnt Grenzfälle nicht mehr per Einzel-Ausreißer."""
+        mit vielen Referenzbildern gewinnt Grenzfälle nicht mehr per Einzel-Ausreißer.
+        top_photo = Dateiname mit der höchsten Einzel-Ähnlichkeit bei der Gewinner-Person
+        (für die Unknown-UI „looks like“-Vorschau)."""
         with self._lock:
-            best = (None, None, 0.0)
+            best = (None, None, 0.0, None)
             for slug, e in self._cache.items():
                 if len(e["files"]) == 0:
                     continue
@@ -758,7 +760,11 @@ class Gallery:
                 k = min(self.top_k, len(sims))
                 score = float(np.sort(sims)[-k:].mean())
                 if score > best[2]:
-                    best = (slug, e["name"], score)
+                    # Thumbnail = best *single* photo (argmax), not one of the top-k
+                    # that entered the mean score — clearest face for the UI cue.
+                    # files[i] aligns with emb[i] / sims[i] from the same person load.
+                    top_i = int(np.argmax(sims))
+                    best = (slug, e["name"], score, e["files"][top_i])
             return best
 
     # ---------- Ignore-Liste (Negativ-Anker) ----------
@@ -1036,8 +1042,12 @@ class Gallery:
                 m = json.loads(jf.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
-            _, name, score = self.match(np.array(m["embedding"], dtype=np.float32))
+            _, name, score, top_photo = self.match(np.array(m["embedding"], dtype=np.float32))
             m["guess"], m["guess_score"] = name, round(float(score), 3)
+            if top_photo:
+                m["guess_top_photo"] = top_photo
+            else:
+                m.pop("guess_top_photo", None)
             jf.write_text(json.dumps(m, ensure_ascii=False))
 
     def discard_unknown(self, uid: str):

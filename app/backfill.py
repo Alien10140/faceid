@@ -79,7 +79,7 @@ def run_backfill(engine, gallery, frigate, frigate_url: str, days: int = 14,
             upgraded = True
             stats["rescued"] = stats.get("rescued", 0) + 1
         emb = face.normed_embedding
-        slug, name, score = gallery.match(emb)
+        slug, name, score, top_photo = gallery.match(emb)
         if gallery.match_ignored(emb) >= max(match_thr, score):
             stats["ignored"] += 1
             continue
@@ -104,7 +104,8 @@ def run_backfill(engine, gallery, frigate, frigate_url: str, days: int = 14,
             crop, save_emb,
             {"camera": ev["camera"], "event_id": ev["id"], "backfill": True,
              "event_ts": ev.get("start_time"),  # wann es passierte, nicht wann wir es fanden
-             "guess": name, "guess_score": round(float(score), 3)},
+             "guess": name, "guess_score": round(float(score), 3),
+             "guess_top_photo": top_photo},
             dedupe_sim=dedupe, full_bgr=full,
         )
         stats["dupe" if uid is None else "faces"] += 1

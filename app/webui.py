@@ -316,7 +316,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         thr = float(cfg["faceid"].get("match_threshold", 0.5))
         assigned: dict[str, int] = {}
         for it in gallery.unknowns():
-            slug, name, score = gallery.match(it["embedding"])
+            slug, name, score, _top = gallery.match(it["embedding"])
             if slug and score >= thr and gallery.assign_unknown(it["id"], slug):
                 assigned[name] = assigned.get(name, 0) + 1
                 if getattr(processor.frigate, "enabled", True) and it.get("event_id"):

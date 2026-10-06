@@ -375,7 +375,7 @@ class EventProcessor:
         """
         via = "" if source == "snapshot" else f" (from the {source})"
         emb = face.normed_embedding
-        slug, name, score = self.gallery.match(emb)
+        slug, name, score, top_photo = self.gallery.match(emb)
         ig = self.gallery.match_ignored(emb)
         if ig >= self.ignore_thr and ig >= score:
             # Gesicht steht auf der Ignore-Liste: nicht melden, nicht taggen, nicht vorlegen
@@ -421,7 +421,8 @@ class EventProcessor:
             prev = st.get("best_unknown")
             if prev is None or face.det_score > prev["det_score"]:
                 st["best_unknown"] = {"crop": crop, "emb": emb, "det_score": float(face.det_score),
-                                      "guess": name, "guess_score": float(score), "full": img,
+                                      "guess": name, "guess_score": float(score),
+                                      "guess_top_photo": top_photo, "full": img,
                                       # aus der Aufnahme ist bereits das schaerfste Bild —
                                       # ein zweiter Durchgang durch hires waere derselbe Clip
                                       "from_clip": source != "snapshot"}
@@ -451,7 +452,8 @@ class EventProcessor:
                 u["crop"], u["emb"],
                 {"camera": camera, "event_id": eid, "event_ts": event_ts,
                  "media_path": media_path, "guess": u["guess"],
-                 "guess_score": round(u["guess_score"], 3)},
+                 "guess_score": round(u["guess_score"], 3),
+                 "guess_top_photo": u.get("guess_top_photo")},
                 full_bgr=u.get("full"),
             )
             self._publish_recognition(eid, st, "unknown", u["guess_score"],
@@ -635,7 +637,8 @@ class EventProcessor:
                         crop, emb,
                         {"camera": st["camera"], "event_id": eid,
                          "event_ts": st.get("start_time"),
-                         "guess": u["guess"], "guess_score": round(u["guess_score"], 3)},
+                         "guess": u["guess"], "guess_score": round(u["guess_score"], 3),
+                         "guess_top_photo": u.get("guess_top_photo")},
                         full_bgr=full,
                     )
                     # crop/emb statt u[...]: kommt der schaerfere Ausschnitt aus der

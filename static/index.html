@@ -71,7 +71,13 @@ h2{font:600 12px var(--mono);color:var(--dim);text-transform:uppercase;letter-sp
 .tile .x{position:absolute;top:0;right:0;background:var(--bg);border:0;color:var(--bad);font:12px var(--mono);padding:2px 6px;cursor:pointer}
 .cluster .head{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
 .cluster .head b{font:600 13px var(--mono);color:var(--fg)}
-.cluster .guess{font:12px var(--mono);color:var(--warn)}
+.cluster .guess{font:12px var(--mono);color:var(--warn);display:inline-flex;align-items:center;gap:6px;position:relative}
+.cluster .guess-thumb{width:32px;height:32px;border-radius:4px;object-fit:cover;border:1px solid var(--warn);cursor:zoom-in;background:var(--panel);flex:0 0 auto}
+.cluster .guess-pop{display:none;position:absolute;left:0;top:calc(100% + 6px);z-index:20;background:var(--panel);border:1px solid var(--acc);border-radius:6px;padding:6px;box-shadow:0 10px 28px rgba(0,0,0,.55)}
+.cluster .guess:hover .guess-pop{display:block}
+.cluster .guess-pop img{width:120px;height:120px;object-fit:cover;border-radius:4px;display:block}
+.cluster .guess-pop .cap{font:10px var(--mono);color:var(--dim);margin-top:4px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cluster.sugg .head .guess-thumb{border-color:var(--acc)}
 .person{border:1px solid var(--line);padding:10px;margin-bottom:14px}
 .person .head{display:flex;align-items:baseline;gap:12px;margin-bottom:8px}
 .person .head b{font:600 14px var(--sans)}
@@ -182,6 +188,31 @@ window.addEventListener('unhandledrejection', ev => {
 function errText(e){const s=String(e&&e.message||e);try{const d=JSON.parse(s).detail;if(d)return String(d);}catch(_){}return s}
 function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function guessPhoto(slug, preferred){
+  const p=persons[slug]; if(!p||!p.files||!p.files.length)return '';
+  if(preferred&&p.files.includes(preferred))return preferred;
+  return p.files[p.files.length-1];
+}
+function guessCue(name, scorePct, slug, preferred, star){
+  if(!name)return '';
+  const file=slug?guessPhoto(slug, preferred||''):'';
+  const label=(star?'★ Looks like ':'looks like ')+esc(name)+(scorePct!=null?` (${scorePct}%)`:'');
+  if(!file){
+    return star
+      ? `<b>★ Looks like ${esc(name)}</b>`
+      : `<span class="guess">${label}</span>`;
+  }
+  const src=`data/persons/${esc(slug)}/${esc(file)}`;
+  const thumb=`<img class="guess-thumb" src="${src}" loading="lazy" alt=""
+    data-url="${src}" data-cap="${esc(name)}"
+    onclick="event.stopPropagation();showFull(this.dataset.url,this.dataset.cap)">`;
+  const pop=`<span class="guess-pop"><img src="${src}" alt=""><div class="cap">${esc(name)}</div></span>`;
+  if(star){
+    return `<span class="guess"><b style="color:var(--acc)">★ Looks like ${esc(name)}</b>${thumb}${pop}</span>`;
+  }
+  return `<span class="guess">${thumb}<span>${label}</span>${pop}</span>`;
+}
+
 function fmtTs(ts){return new Date(ts*1000).toLocaleString(undefined,{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}
 // Wann das Ereignis passierte, nicht wann wir es verarbeitet haben — beim Verlaufs-Scan
 // liegen die Wochen auseinander.
@@ -298,7 +329,7 @@ async function renderUnknowns(){
     return `
     <div class="cluster sugg" data-sg="${gi}">
       <div class="head">
-        <b>★ Looks like ${esc(g.name)}</b>
+        ${guessCue(g.name, null, g.slug, (g.items[0]&&g.items[0].guess_top_photo)||'', true)}
         <span class="stat">${g.items.length} face(s) · avg ${avg}%</span>
         <span style="flex:1"></span>
         <select id="ssel${gi}" title="assign to a different person instead">${personOptions(g.slug)}</select>
@@ -323,7 +354,7 @@ async function renderUnknowns(){
       <div class="head">
         <b>CLUSTER ${String(i+1).padStart(2,'0')}</b>
         <span class="stat">${c.length} capture${c.length>1?'s':''} · ${esc(c[0].camera||'')}</span>
-        ${c[0].guess?`<span class="guess">looks like ${esc(c[0].guess)} (${(c[0].guess_score*100|0)}%)</span>`:''}
+        ${c[0].guess?guessCue(c[0].guess,(c[0].guess_score*100|0),gslug,c[0].guess_top_photo||'',false):''}
         <span style="flex:1"></span>
         <select id="sel${i}" title="assign to an existing person"><option value="">— pick person —</option>${personOptions(gslug)}</select>
         <input id="new${i}" placeholder="…exact name, or Track as new label" size="18" title="ASSIGN: exact new name only (not with a dropdown pick). Track as new: optional role label → Label-xxxxxx (empty → Unnamed-xxxxxx)">
