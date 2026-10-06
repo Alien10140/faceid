@@ -172,6 +172,40 @@ class PruneBackupsTests(unittest.TestCase):
             self.assertEqual(len(list(d.iterdir())), 1)
 
 
+class AtomicWriteTests(unittest.TestCase):
+    """Ein abgebrochenes Backup darf kein gueltiges aelteres kosten."""
+
+    def test_a_failed_write_leaves_no_archive_behind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "data"
+            (data / "persons").mkdir(parents=True)
+            target = Path(tmp) / "out"
+            target.mkdir()
+            good = target / "faceid-backup-20250101-000000.tar.gz"
+            good.write_text("das gute alte Backup")
+            import app.backup_util as bu
+            orig = bu.build_backup_gz
+            bu.build_backup_gz = lambda d: (_ for _ in ()).throw(OSError(28, "No space left on device"))
+            try:
+                with self.assertRaises(OSError):
+                    write_backup_file(data, target)
+            finally:
+                bu.build_backup_gz = orig
+            self.assertEqual([p.name for p in target.iterdir()], [good.name],
+                             "kein Teil-Archiv und kein .part uebrig")
+            prune_backups(target, keep=1)
+            self.assertTrue(good.exists(), "die Rotation darf das gute Backup nicht werfen")
+
+    def test_the_temp_name_is_invisible_to_pruning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / ".faceid-backup-20250101-000000.part").write_text("halb")
+            (d / "faceid-backup-20250102-000000.tar.gz").write_text("gut")
+            prune_backups(d, keep=1)
+            self.assertIn("faceid-backup-20250102-000000.tar.gz",
+                          [p.name for p in d.iterdir()])
+
+
 class WriteBackupFileTests(unittest.TestCase):
     def test_a_read_only_target_raises_instead_of_writing_nothing(self):
         if os.geteuid() == 0:

@@ -565,10 +565,12 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         bdir = _P(f.get("backup_dir") or (data_dir / "backups"))
         try:
             p = write_backup_file(data_dir, bdir)
+            # Die Rotation gehoert mit in den try: sie loescht im selben Verzeichnis und
+            # scheitert aus denselben Gruenden, und ein HTTP 500 dafuer sagt nichts.
+            prune_backups(bdir, int(f.get("backup_keep", 7)))
         except OSError as exc:
             # Klartext statt HTTP 500 — der Pfad kommt aus den Einstellungen.
             raise HTTPException(400, f"cannot write to {bdir}: {exc.strerror or exc}")
-        prune_backups(bdir, int(f.get("backup_keep", 7)))
         return {"ok": True, "file": str(p)}
 
     @app.get("/api/backup")

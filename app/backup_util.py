@@ -92,10 +92,22 @@ def check_backup_dir(backup_dir) -> str | None:
 
 
 def write_backup_file(data_dir: Path, backup_dir: Path) -> Path:
+    """Archiv atomar schreiben: erst unter einem Namen, den prune_backups nicht sieht.
+
+    Bricht das Schreiben ab (kein Platz, I/O-Fehler), bliebe sonst ein abgeschnittenes
+    faceid-backup-*.tar.gz liegen — und weil es das neueste ist, wuerde die Rotation ein
+    gueltiges aelteres dafuer wegwerfen. Ein gescheitertes Backup darf kein gutes kosten.
+    """
     backup_dir.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d-%H%M%S")
     path = backup_dir / f"faceid-backup-{ts}.tar.gz"
-    path.write_bytes(build_backup_gz(data_dir))
+    tmp = backup_dir / f".faceid-backup-{ts}.part"
+    try:
+        tmp.write_bytes(build_backup_gz(data_dir))
+        os.replace(tmp, path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
     return path
 
 
