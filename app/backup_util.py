@@ -1,5 +1,6 @@
 """Backup der Galerie (persons + ignored) als tar.gz — geteilt von API und Auto-Scheduler."""
 import io
+import os
 import logging
 import tarfile
 import tempfile
@@ -24,6 +25,18 @@ def build_backup_gz(data_dir: Path) -> bytes:
     return buf.getvalue()
 
 
+def _persistent_roots() -> list[Path]:
+    """Die Mounts, die einen Neustart ueberleben — leer heisst: nicht pruefen.
+
+    Im Home-Assistant-Addon setzt run.sh FACEID_PERSISTENT_ROOTS, weil dort alles
+    ausserhalb der Mounts im Overlay liegt und beim Update verschwindet. Standalone
+    (Docker, LXC, bare metal) gibt es diese Grenze nicht, also wird dort nichts
+    eingeschraenkt.
+    """
+    raw = os.environ.get("FACEID_PERSISTENT_ROOTS", "")
+    return [Path(r) for r in raw.split(":") if r.strip()]
+
+
 def check_backup_dir(backup_dir) -> str | None:
     """Pruefen, ob dort wirklich geschrieben werden kann. Fehlertext oder None.
 
@@ -35,19 +48,40 @@ def check_backup_dir(backup_dir) -> str | None:
     path = Path(str(backup_dir))
     if not path.is_absolute():
         return f"{path} is not an absolute path"
+    # Erst die Lage pruefen, dann anlegen: ein Tippfehler wie /shre/faceid ist im
+    # Container schreibbar, liegt aber im Overlay und ist nach dem naechsten Update
+    # weg. Ein Backup dort ist schlimmer als keins, weil es keins zu sein scheint.
+    roots = _persistent_roots()
+    if roots and not any(path == r or r in path.parents for r in roots):
+        where = ", ".join(str(r) for r in roots)
+        return f"{path} is not inside a mount that survives a restart ({where})"
+    # Merken, was wir selbst anlegen: scheitert die Probe, soll die Pruefung keine
+    # leeren Verzeichnisse hinterlassen.
+    created = []
+    probe_parent = path
+    while not probe_parent.exists() and probe_parent != probe_parent.parent:
+        created.append(probe_parent)
+        probe_parent = probe_parent.parent
     try:
         path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         return f"cannot create {path}: {exc.strerror or exc}"
+    problem = None
     if not path.is_dir():
-        return f"{path} is not a directory"
-    try:
-        probe = tempfile.NamedTemporaryFile(dir=path, prefix=".faceid-write-test-")
-        probe.write(b"faceid")
-        probe.close()
-    except OSError as exc:
-        return f"cannot write to {path}: {exc.strerror or exc}"
-    return None
+        problem = f"{path} is not a directory"
+    else:
+        try:
+            with tempfile.NamedTemporaryFile(dir=path, prefix=".faceid-write-test-") as probe:
+                probe.write(b"faceid")
+        except OSError as exc:
+            problem = f"cannot write to {path}: {exc.strerror or exc}"
+    if problem:
+        for d in created:
+            try:
+                d.rmdir()
+            except OSError:
+                break  # nicht leer oder nicht unser — stehen lassen
+    return problem
 
 
 def write_backup_file(data_dir: Path, backup_dir: Path) -> Path:

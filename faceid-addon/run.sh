@@ -111,8 +111,20 @@ if [ "${FOLDER_ENABLED}" = "true" ] && [ ! -d "${FOLDER_PATH}" ]; then
 fi
 # Backup-Ziel einmal beim Start pruefen. /media ist read-only gemountet, und ein
 # gescheitertes Backup faellt sonst erst beim Wiederherstellen auf.
+# /data und /share ueberleben Neustart und Update, alles andere im Container nicht.
+# Der Dienst prueft backup_dir gegen diese Liste, damit ein Tippfehler nicht im
+# Overlay landet und beim naechsten Update verschwindet.
+export FACEID_PERSISTENT_ROOTS="/data:/share"
 BACKUP_DIR=$(cfg '.backup_dir')
 if [ -n "${BACKUP_DIR}" ]; then
+    case "${BACKUP_DIR}" in
+        /share/*|/share|/data/*|/data) : ;;
+        *)
+            bashio::log.fatal "backup_dir '${BACKUP_DIR}' is outside the mounts that survive an update."
+            bashio::log.fatal "Use a path under /share (e.g. /share/faceid). /media is mounted read-only."
+            exit 1
+            ;;
+    esac
     if ! mkdir -p "${BACKUP_DIR}" 2>/dev/null; then
         bashio::log.fatal "backup_dir '${BACKUP_DIR}' cannot be created."
         bashio::log.fatal "Only /media (read-only) and /share (writable) are mounted — use /share/faceid."

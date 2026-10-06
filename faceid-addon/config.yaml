@@ -26,6 +26,13 @@ map:
   # share schreibend: Ziel fuer das eingebaute Galerie-Backup (backup_dir). Die Galerie
   # ist das eine, was sich nicht wiederherstellen laesst — und /share liegt in den
   # meisten HA-Backups ohnehin drin, anders als das Daten-Volume der App.
+  #
+  # Home Assistant kennt keinen engeren Mount als den ganzen Baum: share:rw ist alles
+  # oder nichts. Eingegrenzt wird deshalb die Nutzung, nicht die Einhaengung — run.sh
+  # laesst als backup_dir nur /share und /data zu, geschrieben wird allein in dieses
+  # eine Verzeichnis, und geloescht werden ausschliesslich eigene Archive
+  # (faceid-backup-*.tar.gz). addon_config:rw waere enger, verschwindet aber mit der
+  # App und taugt damit nicht als Sicherung.
   - share:rw
 # Der Modell-Cache ist rund 600 MB und laedt sich beim naechsten Start von selbst neu.
 # Ohne diese Zeile steckt er in jedem Home-Assistant-Backup, obwohl er nichts enthaelt,

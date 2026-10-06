@@ -113,3 +113,9 @@ class BackupDirValidationTests(unittest.TestCase):
         block = RUN_SH.split("BACKUP_DIR=", 1)[1].split("if [ -z \"${FRIGATE_URL}\"", 1)[0]
         self.assertIn("/share", block, "Die Fehlermeldung muss den Ausweg nennen")
         self.assertIn("read-only", block)
+
+    def test_run_sh_restricts_the_backup_dir_to_persistent_mounts(self):
+        self.assertIn('export FACEID_PERSISTENT_ROOTS="/data:/share"', RUN_SH)
+        block = RUN_SH.split("BACKUP_DIR=", 1)[1].split('if [ -z "${FRIGATE_URL}"', 1)[0]
+        self.assertIn("/share/*|/share|/data/*|/data", block,
+                      "Ein Pfad im Overlay muss schon beim Start auffallen")

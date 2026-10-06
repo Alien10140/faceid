@@ -49,6 +49,77 @@ class CheckBackupDirTests(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(tmp)), [])
 
 
+class PersistentRootTests(unittest.TestCase):
+    """Im Addon muss ein Pfad ausserhalb der Mounts abgelehnt werden — er liegt im
+    Overlay und ist nach dem naechsten Update weg."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "share"
+        self.root.mkdir()
+        os.environ["FACEID_PERSISTENT_ROOTS"] = str(self.root)
+
+    def tearDown(self):
+        os.environ.pop("FACEID_PERSISTENT_ROOTS", None)
+        self.tmp.cleanup()
+
+    def test_a_path_inside_the_mount_passes(self):
+        self.assertIsNone(check_backup_dir(self.root / "faceid"))
+
+    def test_the_mount_itself_passes(self):
+        self.assertIsNone(check_backup_dir(self.root))
+
+    def test_a_typo_outside_the_mount_is_rejected(self):
+        problem = check_backup_dir(Path(self.tmp.name) / "shre" / "faceid")
+        self.assertIsNotNone(problem)
+        self.assertIn("survives a restart", problem)
+
+    def test_a_rejected_path_is_not_created(self):
+        target = Path(self.tmp.name) / "shre" / "faceid"
+        check_backup_dir(target)
+        self.assertFalse(target.exists(), "Die Pruefung darf nichts anlegen, was sie ablehnt")
+        self.assertFalse(target.parent.exists())
+
+    def test_without_the_variable_any_absolute_path_is_allowed(self):
+        # Standalone (Docker, LXC) kennt diese Grenze nicht.
+        os.environ.pop("FACEID_PERSISTENT_ROOTS")
+        self.assertIsNone(check_backup_dir(Path(self.tmp.name) / "anywhere"))
+
+
+class FailedProbeCleanupTests(unittest.TestCase):
+    @unittest.skipIf(os.geteuid() == 0, "root darf auch in 0o500 schreiben")
+    def test_a_failed_probe_leaves_no_directories_behind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "ro"
+            parent.mkdir()
+            parent.chmod(0o500)
+            target = parent / "deep" / "faceid"
+            try:
+                problem = check_backup_dir(target)
+            finally:
+                parent.chmod(0o700)
+            self.assertIsNotNone(problem)
+            self.assertEqual(sorted(os.listdir(parent)), [])
+
+    @unittest.skipIf(os.geteuid() == 0, "root darf auch in 0o500 schreiben")
+    def test_a_failed_write_probe_leaves_no_file_and_no_new_dir(self):
+        # NamedTemporaryFile raeumt nur beim close auf — ohne with bleibt die
+        # Testdatei im Zielverzeichnis liegen.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "base"
+            base.mkdir()
+            target = base / "faceid"
+            target.mkdir()
+            target.chmod(0o500)
+            try:
+                problem = check_backup_dir(target)
+            finally:
+                target.chmod(0o700)
+            self.assertIsNotNone(problem)
+            self.assertEqual(sorted(os.listdir(target)), [],
+                             "keine .faceid-write-test-Reste")
+
+
 class PruneBackupsTests(unittest.TestCase):
     def test_only_own_archives_are_deleted(self):
         # Gegenprobe zum Verdacht, die Rotation koenne fremde Dateien loeschen.
