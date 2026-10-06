@@ -3,6 +3,32 @@
 All notable changes to FaceID. The Home Assistant app shows this file in the
 update dialog; standalone users can watch GitHub releases.
 
+## 0.25.0 — 2026-10-06
+
+- **Folder mode is available in the Home Assistant app.** The directory watcher has existed
+  in the standalone service since 0.23.0, but the app never offered it: no `folder` options,
+  `frigate_url` was mandatory, and `/media` and `/share` were not mounted at all — so even a
+  hand-written path could not be read. Requested in #31 by a user with five Reolink cameras
+  and no Frigate, uploading snapshots to `/media` over FTP.
+- `frigate_url` may now be left empty. An empty URL means no Frigate: the service falls back
+  to a no-op client, and the gallery, unknown review and history stay usable.
+- `/media` and `/share` are mounted **read-only**. FaceID never changes or deletes what it
+  watches, and no other host path is visible to the app.
+- New options: `folder_enabled`, `folder_path`, `folder_camera`, `folder_recursive`,
+  `folder_process_existing`, `folder_extensions`, `folder_poll_interval`,
+  `folder_settle_seconds`, `folder_max_frames`, `folder_max_people_per_file`,
+  `folder_max_indexed_files`.
+- The app now refuses to start with neither input configured, and warns on start when
+  `folder_path` does not exist inside the container — naming the two mounted roots, since a
+  path the app cannot see is the likeliest mistake.
+- **In folder mode the camera sensor appears at startup**, not only after the first
+  recognition. The folder has no camera list to query, so its name is taken from the
+  configuration; without that a fresh install looked like it was doing nothing.
+- **Fixed: three options were settable and inert.** `cross_risk_margin`, `self_outlier_ratio`
+  and `history_keep` were offered by the app and read by the service, but `run.sh` never
+  wrote them into the generated config — the same defect as #24, in three more fields. Found
+  by a new test that checks every option reaches the generated file.
+
 ## 0.24.0 — 2026-09-15
 
 - **The folder input no longer remembers every file forever.** `data/folder_ingest.json`

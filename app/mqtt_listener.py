@@ -835,9 +835,22 @@ class EventProcessor:
         if only is not None:
             cams = set(only)
         else:
-            cams = (self.cameras
+            # Der Ordner-Eingang hat keine Kameraliste, die man abfragen koennte — sein
+            # Kameraname steht nur in der Konfiguration. Ohne ihn entstuende im reinen
+            # Ordnerbetrieb gar kein Sensor, bis das erste Gesicht erkannt wird, und bis
+            # dahin saehe die Installation aus, als tue sie nichts.
+            fc = self.cfg.get("folder") or {}
+            folder_cams = set()
+            if fc.get("enabled"):
+                folder_cams = {str(fc.get("camera") or "").strip()} - {""}
+            # Vorrang wie bisher: ausdrueckliche Liste, sonst Discovery-Liste, sonst
+            # Frigate fragen. Die Ordner-Kamera kommt immer DAZU statt zu ersetzen —
+            # bei Frigate UND Ordner muessen beide Sensoren entstehen. Frigate wird nur
+            # gefragt, wenn es ueberhaupt an ist: der Aufruf geht ueber das Netz.
+            cams = (set(self.cameras)
                     or set(self.cfg["faceid"].get("discovery_cameras") or [])
-                    or self._frigate_cameras())
+                    or (self._frigate_cameras() if self.frigate_enabled else set()))
+            cams = cams | folder_cams
             self._announced |= cams
             log.info("MQTT discovery: announced %d sensor(s)%s", len(cams),
                      "" if cams else " — cameras unknown, they follow on first recognition")

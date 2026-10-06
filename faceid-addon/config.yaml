@@ -1,5 +1,5 @@
 name: FaceID
-version: "0.24.0"
+version: "0.25.0"
 slug: faceid
 description: Face recognition for Frigate — trainable gallery, clustered unknown review, HA sensors
 url: https://github.com/SkyTechNerds/faceid
@@ -18,6 +18,12 @@ ports:
   8600/tcp: null
 ports_description:
   8600/tcp: Web UI without ingress (optional)
+# Nur lesend: FaceID veraendert und loescht die beobachteten Aufnahmen nie. Ohne diese
+# beiden Einhaengungen sieht die App /media und /share ueberhaupt nicht — genau daran
+# scheitert der Ordner-Eingang in der App, nicht an fehlenden Optionen.
+map:
+  - media:ro
+  - share:ro
 services:
   - mqtt:want
 options:
@@ -58,9 +64,26 @@ options:
   set_sub_label: true
   cameras: []
   discovery_cameras: []
+  folder_enabled: false
+  folder_path: /media/faceid
+  folder_camera: front_door
+  folder_recursive: true
+  folder_process_existing: true
+  folder_extensions:
+    - .mp4
+    - .mkv
+    - .mov
+    - .avi
+    - .webm
+    - .m4v
+  folder_poll_interval: 10
+  folder_settle_seconds: 10
+  folder_max_frames: 24
+  folder_max_people_per_file: 6
+  folder_max_indexed_files: 5000
 schema:
   mqtt_prefix: str
-  frigate_url: url
+  frigate_url: url?
   mqtt_host: str?
   mqtt_port: port
   frigate_user: str?
@@ -100,3 +123,15 @@ schema:
     - str
   discovery_cameras:
     - str
+  folder_enabled: bool
+  folder_path: str?
+  folder_camera: str?
+  folder_recursive: bool
+  folder_process_existing: bool
+  folder_extensions:
+    - str
+  folder_poll_interval: int(1,3600)
+  folder_settle_seconds: int(0,600)
+  folder_max_frames: int(1,120)
+  folder_max_people_per_file: int(1,20)
+  folder_max_indexed_files: int(0,200000)

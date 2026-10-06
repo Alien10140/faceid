@@ -648,3 +648,32 @@ class IndexCapThirdRoundTests(unittest.TestCase):
             ing._enforce_index_cap = original
             ing._finish_scan({"found": 0})
             self.assertEqual(ing.max_indexed_files, 7, "und wird beim naechsten Ende angewandt")
+
+
+class OverwrittenFileTests(unittest.TestCase):
+    """Eine Kamera, die immer dieselbe Datei neu schreibt (Issue #31).
+
+    Der Fingerabdruck haengt an Groesse und mtime, nicht am Namen — deshalb gilt
+    jedes Ueberschreiben als neue Aufnahme. Ohne das waere der haeufigste
+    Reolink/FTP-Aufbau still wirkungslos: eine Erkennung, danach nie wieder.
+    """
+
+    def test_every_overwrite_of_the_same_name_is_processed_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            watch = Path(tmp) / "media"
+            watch.mkdir()
+            cfg = {"folder": {"enabled": True, "path": str(watch), "settle_seconds": 0,
+                              "extensions": [".jpg"], "camera": "front"}, "faceid": {}}
+            proc = FakeProcessor()
+            ing = FolderIngest(cfg, Path(tmp) / "data",
+                               FakeEngine([[FakeFace([1, 0, 0])]]), proc)
+            path = watch / "front.jpg"
+            processed = 0
+            for i in range(3):
+                write_image(path, value=40 * (i + 1))
+                now = time.time() + i * 1000
+                ing.scan_once(now=now)
+                processed += ing.scan_once(now=now + 60)["processed"]
+            self.assertEqual(processed, 3, "jedes Ueberschreiben ist eine neue Aufnahme")
+            self.assertEqual(len(ing._state["files"]), 1,
+                             "gleicher Pfad bleibt ein Indexeintrag")

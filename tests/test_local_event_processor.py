@@ -106,3 +106,82 @@ class ProcessorDefaultsTests(unittest.TestCase):
         # Damit kein Leser den Zeitraum zwischen start() und der Zuweisung abfangen muss.
         from app.mqtt_listener import EventProcessor
         self.assertIsNone(EventProcessor.folder_ingest)
+
+
+class FolderDiscoveryTests(unittest.TestCase):
+    """Im reinen Ordnerbetrieb gibt es keine Kameraliste zum Abfragen.
+
+    Gemeldet als Issue #31: ohne Frigate hat FaceID keine Quelle fuer Kameranamen, und
+    der Sensor entstuende erst beim ersten erkannten Gesicht. Bis dahin sieht die
+    Installation aus, als tue sie nichts.
+    """
+
+    def _processor(self, cfg):
+        return EventProcessor(cfg, engine=None, gallery=FakeGallery(), frigate=FakeFrigate())
+
+    def _announced(self, cfg):
+        proc = self._processor(cfg)
+        seen = []
+        proc.client = SimpleNamespace(publish=lambda topic, payload=None, **kw:
+                                      seen.append(topic))
+        proc._publish_discovery()
+        return proc._announced
+
+    def test_the_folder_camera_is_announced_without_frigate(self):
+        cfg = config()
+        cfg["faceid"]["discovery_cameras"] = []
+        cfg["folder"] = {"enabled": True, "camera": "driveway"}
+        self.assertIn("driveway", self._announced(cfg))
+
+    def test_the_folder_camera_joins_the_configured_ones(self):
+        cfg = config()
+        cfg["folder"] = {"enabled": True, "camera": "driveway"}
+        announced = self._announced(cfg)
+        self.assertIn("driveway", announced)
+        self.assertIn("front_door", announced)
+
+    def test_a_disabled_folder_contributes_no_camera(self):
+        cfg = config()
+        cfg["folder"] = {"enabled": False, "camera": "driveway"}
+        self.assertNotIn("driveway", self._announced(cfg))
+
+    def test_an_empty_folder_camera_is_not_announced(self):
+        cfg = config()
+        cfg["faceid"]["discovery_cameras"] = []
+        cfg["folder"] = {"enabled": True, "camera": "  "}
+        self.assertEqual(self._announced(cfg), set())
+
+    def test_frigate_is_not_queried_when_the_folder_name_suffices(self):
+        # Der Aufruf geht ueber das Netz. Im Ordnerbetrieb steht der Name schon fest.
+        cfg = config()
+        cfg["faceid"]["discovery_cameras"] = []
+        cfg["folder"] = {"enabled": True, "camera": "driveway"}
+        proc = self._processor(cfg)
+        proc.client = SimpleNamespace(publish=lambda *a, **k: None)
+        called = []
+        proc.frigate_enabled = False
+        proc._frigate_cameras = lambda: called.append(1) or set()
+        proc._publish_discovery()
+        self.assertEqual(called, [], "ohne Frigate darf nicht gefragt werden")
+
+    def test_frigate_is_still_queried_when_nothing_else_is_known(self):
+        cfg = config()
+        cfg["faceid"]["discovery_cameras"] = []
+        proc = self._processor(cfg)
+        proc.frigate_enabled = True
+        proc.client = SimpleNamespace(publish=lambda *a, **k: None)
+        proc._frigate_cameras = lambda: {"from_frigate"}
+        proc._publish_discovery()
+        self.assertIn("from_frigate", proc._announced)
+
+    def test_frigate_cameras_still_appear_alongside_a_folder(self):
+        # Gemischter Aufbau: beide Quellen muessen beim Start einen Sensor bekommen.
+        cfg = config()
+        cfg["faceid"]["discovery_cameras"] = []
+        cfg["folder"] = {"enabled": True, "camera": "driveway"}
+        proc = self._processor(cfg)
+        proc.frigate_enabled = True
+        proc.client = SimpleNamespace(publish=lambda *a, **k: None)
+        proc._frigate_cameras = lambda: {"hof", "tor"}
+        proc._publish_discovery()
+        self.assertEqual(proc._announced, {"driveway", "hof", "tor"})

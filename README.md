@@ -166,7 +166,9 @@ the whole gallery would need re-enrolling.
    (or manually: **Settings → Apps → App Store → ⋮ → Repositories** → add
    `https://github.com/SkyTechNerds/faceid`)
 2. Install the **FaceID** app, set your Frigate URL in the options (MQTT is picked up
-   automatically from the Mosquitto app) and start it.
+   automatically from the Mosquitto app) and start it. **No Frigate?** Leave `frigate_url`
+   empty and switch on `folder_enabled` instead — see
+   [folder mode in the app](#folder-mode-in-the-home-assistant-app).
 3. Open the **FaceID** panel in the sidebar. First start downloads the model (~300 MB).
 
 The app is built locally on your machine (amd64/aarch64). See
@@ -238,7 +240,10 @@ Trade-offs, TLS, what FaceID actually requests, and which setup fits which netwo
 
 Contributed by [@thethereza](https://github.com/thethereza) — the idea and the implementation are his. FaceID began as a Frigate companion, but the recognition, gallery, unknown review and history were never Frigate-specific; only the source of the images was.
 
-Set `frigate.enabled: false` and add a `folder` section to `config.yaml`:
+Standalone: set `frigate.enabled: false` and add a `folder` section to `config.yaml`.
+Running the Home Assistant app? The same input is available there —
+[jump to the app options](#folder-mode-in-the-home-assistant-app).
+
 
 ```yaml
 frigate:
@@ -290,6 +295,42 @@ that, naming both numbers. If you keep recordings around rather than clearing th
 either raise the cap or set it to `0`. Replacing a file at the same path gives it a new fingerprint and
 processes it again. The Unknown-tab button becomes **Scan recording folder**, and the
 header shows the number of processed files.
+
+## Folder mode in the Home Assistant app
+
+Available since v0.25.0 — before that the input existed only in the standalone service.
+
+The app mounts `/media` and `/share` **read-only**; FaceID never changes or deletes what it
+watches. No other host path is visible to it, so put the images somewhere under those two.
+
+```yaml
+frigate_url: ""            # leave empty — no Frigate
+folder_enabled: true
+folder_path: /media/faceid
+folder_camera: front_door  # the MQTT sensor becomes sensor.faceid_front_door
+folder_extensions:
+  - .jpg                   # the default list is video-only, see below
+  - .jpeg
+  - .png
+  - .webp
+```
+
+**Still images need their extension listed.** The default `folder_extensions` covers video
+only. A folder of `.jpg` is skipped in silence until you add it — and the key *replaces*
+the list rather than extending it, so keep the video formats you still want.
+
+**A camera that overwrites the same file works.** FaceID fingerprints by size and
+modification time, not by name, so `front.jpg` replaced on every motion event is seen as a
+new recording each time.
+
+⚠️ **One camera name per folder.** `folder_camera` applies to everything the watcher finds.
+Several cameras writing into one directory all report under that single name. For separate
+sensors, run them through separate paths — or use Frigate, which carries the camera name
+with each event.
+
+Everything else is shared with the standalone service: the gallery, unknown review,
+history, MQTT sensors and the `max_indexed_files` cap all behave the same. Full option
+reference: [faceid-addon/DOCS.md](faceid-addon/DOCS.md).
 
 ## Getting started
 
