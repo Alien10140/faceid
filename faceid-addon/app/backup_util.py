@@ -34,7 +34,9 @@ def _persistent_roots() -> list[Path]:
     eingeschraenkt.
     """
     raw = os.environ.get("FACEID_PERSISTENT_ROOTS", "")
-    return [Path(r) for r in raw.split(":") if r.strip()]
+    # Auch die Wurzeln aufloesen: sonst vergleicht man einen aufgeloesten Zielpfad
+    # gegen einen Symlink und lehnt ein voellig gueltiges Ziel ab.
+    return [Path(r).resolve() for r in raw.split(":") if r.strip()]
 
 
 def check_backup_dir(backup_dir) -> str | None:
@@ -45,16 +47,21 @@ def check_backup_dir(backup_dir) -> str | None:
     Deshalb einmal echt hinschreiben statt os.access zu fragen — im HA-Addon
     ist /media read-only gemountet, und das sieht man nur am Schreibversuch.
     """
-    path = Path(str(backup_dir))
-    if not path.is_absolute():
-        return f"{path} is not an absolute path"
+    given = Path(str(backup_dir))
+    if not given.is_absolute():
+        return f"{given} is not an absolute path"
+    # Aufloesen, bevor irgendetwas geprueft wird: path.parents ist rein lexikalisch,
+    # also kaeme /share/../config/faceid als "unter /share" durch und wuerde dann in
+    # /config landen. resolve() nimmt .. heraus und folgt Symlinks im vorhandenen Teil.
+    path = given.resolve()
     # Erst die Lage pruefen, dann anlegen: ein Tippfehler wie /shre/faceid ist im
     # Container schreibbar, liegt aber im Overlay und ist nach dem naechsten Update
     # weg. Ein Backup dort ist schlimmer als keins, weil es keins zu sein scheint.
     roots = _persistent_roots()
     if roots and not any(path == r or r in path.parents for r in roots):
         where = ", ".join(str(r) for r in roots)
-        return f"{path} is not inside a mount that survives a restart ({where})"
+        shown = f"{given} (resolves to {path})" if path != given else str(given)
+        return f"{shown} is not inside a mount that survives a restart ({where})"
     # Merken, was wir selbst anlegen: scheitert die Probe, soll die Pruefung keine
     # leeren Verzeichnisse hinterlassen.
     created = []

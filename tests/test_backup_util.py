@@ -80,6 +80,35 @@ class PersistentRootTests(unittest.TestCase):
         self.assertFalse(target.exists(), "Die Pruefung darf nichts anlegen, was sie ablehnt")
         self.assertFalse(target.parent.exists())
 
+    def test_a_dotdot_escape_is_rejected(self):
+        # /share/../config/faceid listet /share lexikalisch als parent und kaeme sonst
+        # durch, obwohl geschrieben wird, wohin es wirklich auflöst.
+        escape = self.root / ".." / "config" / "faceid"
+        problem = check_backup_dir(escape)
+        self.assertIsNotNone(problem, "lexikalische Pruefung allein reicht nicht")
+        self.assertIn("resolves to", problem)
+        self.assertFalse((Path(self.tmp.name) / "config").exists())
+
+    def test_a_symlink_out_of_the_mount_is_rejected(self):
+        outside = Path(self.tmp.name) / "elsewhere"
+        outside.mkdir()
+        link = self.root / "link"
+        link.symlink_to(outside)
+        problem = check_backup_dir(link / "faceid")
+        self.assertIsNotNone(problem, "Symlinks duerfen nicht aus dem Mount fuehren")
+        self.assertFalse((outside / "faceid").exists())
+
+    def test_a_symlinked_root_still_accepts_its_own_tree(self):
+        # Gegenprobe: die Wurzel selbst darf ein Symlink sein (so liegt /share auf
+        # manchen Systemen), ohne dass jedes Ziel darunter abgelehnt wird.
+        real = Path(self.tmp.name) / "real-share"
+        real.mkdir()
+        linked = Path(self.tmp.name) / "linked-share"
+        linked.symlink_to(real)
+        os.environ["FACEID_PERSISTENT_ROOTS"] = str(linked)
+        self.assertIsNone(check_backup_dir(linked / "faceid"))
+        self.assertTrue((real / "faceid").is_dir())
+
     def test_without_the_variable_any_absolute_path_is_allowed(self):
         # Standalone (Docker, LXC) kennt diese Grenze nicht.
         os.environ.pop("FACEID_PERSISTENT_ROOTS")
