@@ -12,8 +12,9 @@ update dialog; standalone users can watch GitHub releases.
   and no Frigate, uploading snapshots to `/media` over FTP.
 - `frigate_url` may now be left empty. An empty URL means no Frigate: the service falls back
   to a no-op client, and the gallery, unknown review and history stay usable.
-- `/media` and `/share` are mounted **read-only**. FaceID never changes or deletes what it
-  watches, and no other host path is visible to the app.
+- `/media` is mounted **read-only** and `/share` writable (the latter only so gallery
+  backups can be written there, see below). FaceID never changes or deletes what it watches,
+  and no other host path is visible to the app.
 - New options: `folder_enabled`, `folder_path`, `folder_camera`, `folder_recursive`,
   `folder_process_existing`, `folder_extensions`, `folder_poll_interval`,
   `folder_settle_seconds`, `folder_max_frames`, `folder_max_people_per_file`,
@@ -32,6 +33,18 @@ update dialog; standalone users can watch GitHub releases.
   the built-in gallery backup at `/share/faceid` puts it where Home Assistant's own backups
   already look — a few MB for the one thing that cannot be re-created. `/media` stays
   read-only: it is a source, never a target.
+- **A backup target that cannot be written is refused right away** — at start-up, when you
+  save it in Settings, and on a manual backup — instead of letting every nightly backup fail
+  into the log, which is a failure you discover when you need the backup. The check writes a
+  real probe file and removes it again, because `/media` is readable and only the write
+  attempt reveals that the mount is read-only.
+- The target must also resolve **inside a mount that survives an update** (`/data` or
+  `/share` in the app). A typo like `/shre/faceid` is writable inside the container but lives
+  in the overlay filesystem, so the archive would vanish with the next update — a backup that
+  looks like one and is not. Paths are resolved first, so `..` segments and symlinks cannot
+  step outside. Standalone installs have no such boundary and stay unrestricted.
+- Settings and "Back up now" now show the reason when a path is rejected. Saving an unusable
+  path previously produced no message at all.
 - Still open from #33: the app image itself (~1.4 GB) is in every backup because the app is
   built locally. That needs prebuilt images and is tracked separately.
 - **Fixed: three options were settable and inert.** `cross_risk_margin`, `self_outlier_ratio`
