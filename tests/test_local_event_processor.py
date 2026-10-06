@@ -150,3 +150,24 @@ class FolderDiscoveryTests(unittest.TestCase):
         cfg["faceid"]["discovery_cameras"] = []
         cfg["folder"] = {"enabled": True, "camera": "  "}
         self.assertEqual(self._announced(cfg), set())
+
+    def test_frigate_is_not_queried_when_the_folder_name_suffices(self):
+        # Der Aufruf geht ueber das Netz. Im Ordnerbetrieb steht der Name schon fest.
+        cfg = config()
+        cfg["faceid"]["discovery_cameras"] = []
+        cfg["folder"] = {"enabled": True, "camera": "driveway"}
+        proc = self._processor(cfg)
+        proc.client = SimpleNamespace(publish=lambda *a, **k: None)
+        called = []
+        proc._frigate_cameras = lambda: called.append(1) or set()
+        proc._publish_discovery()
+        self.assertEqual(called, [], "Frigate darf hier nicht gefragt werden")
+
+    def test_frigate_is_still_queried_when_nothing_else_is_known(self):
+        cfg = config()
+        cfg["faceid"]["discovery_cameras"] = []
+        proc = self._processor(cfg)
+        proc.client = SimpleNamespace(publish=lambda *a, **k: None)
+        proc._frigate_cameras = lambda: {"from_frigate"}
+        proc._publish_discovery()
+        self.assertIn("from_frigate", proc._announced)
