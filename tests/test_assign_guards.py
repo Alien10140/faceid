@@ -69,6 +69,20 @@ class AssignGuardTests(unittest.TestCase):
         self.assertIn(slug, self.gallery.persons(),
                       "eine vorhandene Person darf ein Fehlversuch nie loeschen")
 
+    def test_a_display_name_for_an_existing_person_never_deletes_it(self):
+        # create_person ist idempotent: "Juli" liefert den vorhandenen Slug "juli"
+        # zurueck. Wer am Eingabewert statt am aufgeloesten Slug entscheidet, loescht
+        # hier eine bestehende Person samt Gesichtern.
+        from fastapi import HTTPException
+        slug = self.gallery.create_person("Juli")
+        self.assertEqual(slug, "juli")
+        for typed in ("Juli", " juli ", "JULI"):
+            with self.assertRaises(HTTPException) as cm:
+                self.assign(self.Body(ids=["does-not-exist"], person=typed))
+            self.assertEqual(cm.exception.status_code, 409)
+            self.assertIn(slug, self.gallery.persons(),
+                          f"Eingabe {typed!r} darf die vorhandene Person nicht loeschen")
+
     def test_a_successful_assign_still_returns_the_count(self):
         # Gegenprobe: der 409 darf nur den Nullfall treffen.
         import numpy as np

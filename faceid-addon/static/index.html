@@ -96,7 +96,9 @@ h2{font:600 12px var(--mono);color:var(--dim);text-transform:uppercase;letter-sp
   outline:2px solid var(--fg);outline-offset:2px}
 .act[disabled],button.act[disabled],.ghost[disabled],button.ghost[disabled]{
   opacity:.45;cursor:not-allowed}
-@media (prefers-reduced-motion:reduce){.act,button.act,.ghost,button.ghost{transition:none}}
+/* Die einzige Bewegung hier ist der 1px-Versatz beim Druecken — genau der gehoert
+   abgeschaltet. 'transition:none' waere wirkungslos gewesen: keine deklariert. */
+@media (prefers-reduced-motion:reduce){.act:active,button.act:active{transform:none}}
 /* Regler in der Akzentfarbe statt im Browser-Blau — das Blau war die einzige Farbe
    der Oberflaeche, die nicht aus der Palette stammte, und stand direkt neben den
    gruenen Zahlenwerten. Gilt zugleich fuer Ankreuzfelder. */
@@ -170,6 +172,10 @@ async function j(url,opt){const r=await fetch(url,opt);if(!r.ok)throw new Error(
 // eigenes catch — ohne das hier bleibt ein fehlgeschlagener Klick ein stilles
 // Nichts. Ein Platz statt 25 verhindert, dass der naechste Handler es wieder vergisst.
 window.addEventListener('unhandledrejection', ev => {
+  // Erst in die Konsole, dann der Toast: preventDefault() unterdrueckt die
+  // Standardausgabe des Browsers, und ein TypeError waere sonst nur noch ein auf
+  // 120 Zeichen gekuerzter Hinweis ohne Stapel — schlechter als vorher.
+  console.error('unhandled rejection:', ev.reason);
   toast('Failed: ' + errText(ev.reason).slice(0, 120));
   ev.preventDefault();
 });

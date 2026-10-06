@@ -274,8 +274,12 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     @app.post("/api/unknowns/assign")
     def assign(body: AssignBody):
         persons_now = gallery.persons()
-        existed = body.person in persons_now
-        slug = body.person if existed else gallery.create_person(body.person)
+        slug = body.person if body.person in persons_now else gallery.create_person(body.person)
+        # Am aufgeloesten Slug entscheiden, nicht an der Eingabe: create_person ist
+        # absichtlich idempotent und gibt zu "Juli", "juli " oder einem zweiten Tab
+        # denselben vorhandenen Slug zurueck. Wer hier die Eingabe prueft, loescht
+        # bei null Treffern eine bestehende Person samt ihrer Gesichter.
+        created_now = slug not in persons_now
         name = gallery.persons()[slug]["name"]
         n = 0
         for uid in body.ids:
@@ -299,7 +303,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
             # sie wieder weg: sonst haeuft jeder Fehlversuch ueber "Track as new" ein
             # leeres Unnamed-xxxxxx in der Galerie an, das niemand zuordnen kann.
             # Eine vorhandene Person wird nie geloescht.
-            if not existed:
+            if created_now:
                 gallery.delete_person(slug)
                 raise HTTPException(409, f"no face was assigned — {name} was not created")
             raise HTTPException(409, "no face was assigned — the queue may have changed")
