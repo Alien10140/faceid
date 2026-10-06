@@ -46,10 +46,19 @@ class SchemaCoverageTests(unittest.TestCase):
 
 
 class FolderModeTests(unittest.TestCase):
-    def test_media_and_share_are_mapped_read_only(self):
-        # Ohne die Einhaengung sieht die App den Ordner nicht, egal wie er konfiguriert
-        # ist. Lesend genuegt: FaceID veraendert die Aufnahmen nie.
-        self.assertEqual(sorted(CONFIG.get("map") or []), ["media:ro", "share:ro"])
+    def test_media_and_share_are_mapped(self):
+        # Ohne die Einhaengung sieht die App den Ordner nicht, egal wie er konfiguriert ist.
+        self.assertEqual(sorted(CONFIG.get("map") or []), ["media:ro", "share:rw"])
+
+    def test_the_watched_root_stays_read_only(self):
+        # media ist die Quelle: FaceID darf Aufnahmen nie veraendern oder loeschen.
+        # share ist Ziel des Galerie-Backups und deshalb als einziges schreibbar.
+        self.assertIn("media:ro", CONFIG["map"])
+        self.assertNotIn("media:rw", CONFIG["map"])
+
+    def test_the_model_cache_is_excluded_from_backups(self):
+        # Rund 600 MB, die sich beim naechsten Start von selbst neu laden.
+        self.assertIn("model-cache", CONFIG.get("backup_exclude") or [])
 
     def test_the_generated_config_has_a_folder_block(self):
         self.assertRegex(TEMPLATE, r"(?m)^folder:$")

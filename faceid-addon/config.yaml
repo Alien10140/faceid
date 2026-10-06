@@ -23,7 +23,16 @@ ports_description:
 # scheitert der Ordner-Eingang in der App, nicht an fehlenden Optionen.
 map:
   - media:ro
-  - share:ro
+  # share schreibend: Ziel fuer das eingebaute Galerie-Backup (backup_dir). Die Galerie
+  # ist das eine, was sich nicht wiederherstellen laesst — und /share liegt in den
+  # meisten HA-Backups ohnehin drin, anders als das Daten-Volume der App.
+  - share:rw
+# Der Modell-Cache ist rund 600 MB und laedt sich beim naechsten Start von selbst neu.
+# Ohne diese Zeile steckt er in jedem Home-Assistant-Backup, obwohl er nichts enthaelt,
+# was verloren gehen koennte.
+backup_exclude:
+  - model-cache
+  - model-cache/**
 services:
   - mqtt:want
 options:
@@ -60,6 +69,7 @@ options:
   backup_enabled: false
   backup_hour: 3
   backup_keep: 7
+  backup_dir: ""
   presence_window: 120
   set_sub_label: true
   cameras: []
@@ -117,6 +127,7 @@ schema:
   backup_enabled: bool
   backup_hour: int(0,23)
   backup_keep: int(1,90)
+  backup_dir: str?
   presence_window: int(10,3600)
   set_sub_label: bool
   cameras:

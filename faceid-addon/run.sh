@@ -149,6 +149,7 @@ faceid:
   backup_enabled: $(cfg '.backup_enabled')
   backup_hour: $(cfg '.backup_hour')
   backup_keep: $(cfg '.backup_keep')
+  backup_dir: $(yml '.backup_dir')
   presence_window: $(cfg '.presence_window')
   cross_risk_margin: $(cfg '.cross_risk_margin')
   self_outlier_ratio: $(cfg '.self_outlier_ratio')

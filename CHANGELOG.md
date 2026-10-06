@@ -24,6 +24,16 @@ update dialog; standalone users can watch GitHub releases.
 - **In folder mode the camera sensor appears at startup**, not only after the first
   recognition. The folder has no camera list to query, so its name is taken from the
   configuration; without that a fresh install looked like it was doing nothing.
+- **Home Assistant backups of the app shrink by roughly 600 MB.** The recognition model
+  cache was stored in every backup although it re-downloads by itself on the next start;
+  `backup_exclude` now leaves it out. Reported in #33 with measurements: 1.1 GB compressed
+  for an app whose irreplaceable data is about 11 MB.
+- **`backup_dir` is settable in the app**, and `/share` is mounted writable for it. Pointing
+  the built-in gallery backup at `/share/faceid` puts it where Home Assistant's own backups
+  already look — a few MB for the one thing that cannot be re-created. `/media` stays
+  read-only: it is a source, never a target.
+- Still open from #33: the app image itself (~1.4 GB) is in every backup because the app is
+  built locally. That needs prebuilt images and is tracked separately.
 - **Fixed: three options were settable and inert.** `cross_risk_margin`, `self_outlier_ratio`
   and `history_keep` were offered by the app and read by the service, but `run.sh` never
   wrote them into the generated config — the same defect as #24, in three more fields. Found
