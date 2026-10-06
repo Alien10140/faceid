@@ -9,6 +9,7 @@ Full documentation: https://github.com/SkyTechNerds/faceid
 ## Setup
 
 1. Set `frigate_url` to your Frigate instance (e.g. `http://192.168.1.10:5000`).
+   **No Frigate?** Leave it empty and use folder mode instead (below).
 2. MQTT: leave `mqtt_host` empty to automatically use the Mosquitto broker app.
    Fill the `mqtt_*` options only for an external broker.
 3. Optional: restrict processing to specific cameras (`cameras`), and list the cameras
@@ -42,6 +43,49 @@ Full documentation: https://github.com/SkyTechNerds/faceid
 | `frigate_topic_prefix` | must match `mqtt.topic_prefix` in Frigate's own config (default `frigate`). Wrong value = FaceID hears nothing at all |
 | `poll_interval` | seconds; >0 also polls Frigate's event API for events MQTT never announces (e.g. events created by an automation from a camera's own detection). 0 = off |
 | `backup_enabled` / `backup_hour` / `backup_keep` | optional built-in daily gallery backup |
+| `cross_risk_margin` | how close two people's references may get before one is set aside (relative to `match_threshold`; 0 or below = off) |
+| `self_outlier_ratio` | sets aside a reference photo that fits its own person far worse than the rest (0 = off) |
+| `history_keep` | how many recognitions the History tab keeps (0 = history off) |
+| `folder_*` | watch a directory instead of (or alongside) Frigate — see below |
+
+## Folder mode — watch a directory instead of Frigate
+
+For setups without Frigate: point FaceID at a folder of finished recordings or snapshots.
+Everything else stays the same — gallery, unknown review, history, MQTT sensors.
+
+```yaml
+frigate_url: ""
+folder_enabled: true
+folder_path: /media/faceid
+folder_camera: front_door
+folder_extensions: [".jpg", ".jpeg", ".png", ".webp"]
+```
+
+⚠️ **Only `/media` and `/share` are visible to the app**, mounted read-only — FaceID never
+changes or deletes the files it watches. A path under `/config` or on the host will not be
+found, and the log says so on start.
+
+⚠️ **Still images need their extension listed.** The default `folder_extensions` is
+video-only, and the option *replaces* that list rather than adding to it. A folder of
+`.jpg` is skipped in silence until you list it.
+
+A camera that keeps overwriting the same file works: FaceID fingerprints by size and
+modification time, not by name. One `folder_camera` applies to the whole folder, so
+several cameras writing into one directory all report under that single sensor.
+
+| Option | Description |
+|---|---|
+| `folder_enabled` | switch the directory watcher on |
+| `folder_path` | directory to watch, under `/media` or `/share` |
+| `folder_camera` | name used for the MQTT sensor and in the history |
+| `folder_recursive` | also watch subdirectories |
+| `folder_process_existing` | process what is already there on first start (off = only new files) |
+| `folder_extensions` | which file types to pick up — replaces the default video-only list |
+| `folder_poll_interval` | seconds between directory scans |
+| `folder_settle_seconds` | a file must be this old and unchanged across two scans before it is read |
+| `folder_max_frames` | frames sampled per video |
+| `folder_max_people_per_file` | cap on distinct faces kept from one file |
+| `folder_max_indexed_files` | cap on the "already seen" index (0 = unlimited). Keep it above the number of files the folder holds, otherwise every scan re-reads the overflow |
 
 Thresholds and backup can also be changed live on the app's **Settings** tab; those
 edits are stored in the app's data volume and override these options. The Settings tab

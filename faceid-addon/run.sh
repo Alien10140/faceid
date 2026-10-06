@@ -86,9 +86,37 @@ CAMERAS=$(jq -c '.cameras // []' "${OPT}")
 DISCOVERY=$(jq -c '.discovery_cameras // []' "${OPT}")
 CLIPCAMS=$(jq -c '.clip_fallback_cameras // []' "${OPT}")
 LIVECAMS=$(jq -c '.live_hires_fallback_cameras // []' "${OPT}")
+FOLDEREXT=$(jq -c '.folder_extensions // []' "${OPT}")
+
+# Eingaenge pruefen, bevor die Konfiguration geschrieben wird. Ohne das startet FaceID
+# mit beiden Quellen aus und meldet erst beim ersten Scan, dass es nichts zu tun gibt.
+FRIGATE_URL=$(cfg '.frigate_url')
+FOLDER_ENABLED=$(cfg '.folder_enabled')
+FOLDER_PATH=$(cfg '.folder_path')
+
+if [ -z "${FRIGATE_URL}" ] && [ "${FOLDER_ENABLED}" != "true" ]; then
+    bashio::log.fatal "No input configured: set frigate_url, or switch folder_enabled on and set folder_path."
+    exit 1
+fi
+if [ "${FOLDER_ENABLED}" = "true" ] && [ -z "${FOLDER_PATH}" ]; then
+    bashio::log.fatal "folder_enabled is on but folder_path is empty."
+    exit 1
+fi
+if [ "${FOLDER_ENABLED}" = "true" ] && [ ! -d "${FOLDER_PATH}" ]; then
+    # Keine Abbruchbedingung: der Ordner darf spaeter entstehen, und FaceID meldet den
+    # Fehlversuch bei jedem Scan. Aber der haeufigste Fehler ist ein Pfad, den der
+    # Container gar nicht sieht — deshalb hier einmal laut, mit den erlaubten Wurzeln.
+    bashio::log.warning "folder_path '${FOLDER_PATH}' does not exist inside the add-on."
+    bashio::log.warning "Only /media and /share are mounted; /config and host paths are not visible."
+fi
+if [ -z "${FRIGATE_URL}" ]; then
+    bashio::log.info "No frigate_url set — running on the folder input alone."
+fi
 
 cat > /opt/faceid/config.yaml << EOF
 frigate:
+  # Leere URL heisst: kein Frigate. FrigateAPI leitet ``enabled`` daraus ab und liefert
+  # dann einen No-op-Client, damit Galerie und Review-Oberflaeche nutzbar bleiben.
   url: $(yml '.frigate_url')
   # Nur fuer Frigates authentifizierten Port 8971 noetig. Leer lassen heisst offene API:
   # FrigateAPI macht aus dem leeren Wert None, genau wie im Standalone-Betrieb.
@@ -122,6 +150,9 @@ faceid:
   backup_hour: $(cfg '.backup_hour')
   backup_keep: $(cfg '.backup_keep')
   presence_window: $(cfg '.presence_window')
+  cross_risk_margin: $(cfg '.cross_risk_margin')
+  self_outlier_ratio: $(cfg '.self_outlier_ratio')
+  history_keep: $(cfg '.history_keep')
   set_sub_label: $(cfg '.set_sub_label')
   min_face_px: $(cfg '.min_face_px')
   det_size: $(cfg '.det_size')
@@ -129,6 +160,18 @@ faceid:
   retry_seconds: 2.5
   cameras: ${CAMERAS}
   discovery_cameras: ${DISCOVERY}
+folder:
+  enabled: $(cfg '.folder_enabled')
+  path: $(yml '.folder_path')
+  camera: $(yml '.folder_camera')
+  recursive: $(cfg '.folder_recursive')
+  process_existing: $(cfg '.folder_process_existing')
+  extensions: ${FOLDEREXT}
+  poll_interval: $(cfg '.folder_poll_interval')
+  settle_seconds: $(cfg '.folder_settle_seconds')
+  max_frames: $(cfg '.folder_max_frames')
+  max_people_per_file: $(cfg '.folder_max_people_per_file')
+  max_indexed_files: $(cfg '.folder_max_indexed_files')
 EOF
 
 # Galerie + Modell-Cache im persistenten /data-Volume (überlebt Updates)
