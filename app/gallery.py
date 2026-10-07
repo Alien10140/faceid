@@ -5,6 +5,7 @@ Kein Training, kein Overfitting: jedes Bild ist ein eigener Vergleichspunkt.
 """
 import hashlib
 import json
+import os
 import logging
 import re
 import shutil
@@ -65,6 +66,9 @@ class Gallery:
         self.self_outlier_min_photos = 5  # darunter ist der Median nicht belastbar
         self.dedupe_threshold = 0.65  # ab hier gilt ein Foto als Duplikat (Hover-Highlight + Dedup)
         self._lock = threading.Lock()
+        self._refresh_sched_lock = threading.Lock()
+        self._refresh_deadline = None
+        self._refresh_thread = None
         self._cache = {}  # slug -> {"name":..., "emb": np.ndarray, "files": [...]}
         self._ign_emb = np.zeros((0, 512), dtype=np.float32)
         self._ign_ids: list[str] = []
@@ -1052,7 +1056,51 @@ class Gallery:
             else:
                 m.pop("guess_top_photo", None)
                 m.pop("guess_top_slug", None)
-            jf.write_text(json.dumps(m, ensure_ascii=False))
+            # Atomic replace — a crashed mid-write would otherwise truncate the
+            # JSON (and the embedding inside it) for a silent loss on next load.
+            raw = json.dumps(m, ensure_ascii=False)
+            tmp = jf.with_suffix(".json.tmp")
+            tmp.write_text(raw)
+            os.replace(tmp, jf)
+
+    def request_refresh_guesses(self, delay: float = 0.4):
+        """Coalesce refresh_guesses from request handlers (delete / set-aside / dedupe).
+
+        Each refresh re-matches every unknown; firing it once per deleted photo
+        is O(N × unknowns) on the HTTP thread. A short debounce collapses a
+        cleanup burst into one background pass.
+        """
+        with self._refresh_sched_lock:
+            self._refresh_deadline = time.time() + delay
+            if self._refresh_thread is not None and self._refresh_thread.is_alive():
+                return
+            t = threading.Thread(target=self._refresh_guesses_worker, name="refresh-guesses",
+                                 daemon=True)
+            self._refresh_thread = t
+            t.start()
+
+    def _refresh_guesses_worker(self):
+        while True:
+            with self._refresh_sched_lock:
+                deadline = self._refresh_deadline
+            if deadline is None:
+                return
+            wait = deadline - time.time()
+            if wait > 0:
+                time.sleep(wait)
+                continue
+            with self._refresh_sched_lock:
+                if self._refresh_deadline is not None and time.time() < self._refresh_deadline:
+                    continue
+                self._refresh_deadline = None
+            try:
+                self.refresh_guesses()
+            except Exception:
+                log.exception("background refresh_guesses failed")
+            with self._refresh_sched_lock:
+                if self._refresh_deadline is None:
+                    self._refresh_thread = None
+                    return
 
     def discard_unknown(self, uid: str):
         (self.unknown_dir / f"{uid}.json").unlink(missing_ok=True)

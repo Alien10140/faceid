@@ -77,7 +77,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     @app.delete("/api/persons/{slug}")
     def delete_person(slug: str):
         gallery.delete_person(slug)
-        gallery.refresh_guesses()
+        gallery.request_refresh_guesses()
         return {"ok": True}
 
     class FavBody(BaseModel):
@@ -150,7 +150,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         if not gallery.set_aside(slug, fname, body.reason):
             raise HTTPException(404, "unknown person or photo")
         log.info("%s/%s set aside — %s", slug, fname, body.reason)
-        gallery.refresh_guesses()
+        gallery.request_refresh_guesses()
         return {"ok": True}
 
     @app.post("/api/persons/{slug}/rename")
@@ -173,7 +173,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     def restore_trimmed(slug: str, fname: str):
         ok = gallery.restore_trimmed(slug, fname)
         if ok:
-            gallery.refresh_guesses()
+            gallery.request_refresh_guesses()
         return {"ok": ok}
 
     @app.delete("/api/persons/{slug}/trimmed/{fname}")
@@ -194,14 +194,14 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         pix = gallery.deduplicate_pixels_all(dry_run=dry)
         emb = gallery.deduplicate_all(thr, dry_run=dry)
         if not dry and (pix or emb):
-            gallery.refresh_guesses()
+            gallery.request_refresh_guesses()
         key = "would_remove" if dry else "moved"
         return {key: pix + emb, "same_image": pix, "similar_face": emb, "threshold": thr}
 
     @app.delete("/api/persons/{slug}/faces/{fname}")
     def delete_face(slug: str, fname: str):
         gallery.delete_face(slug, fname)
-        gallery.refresh_guesses()
+        gallery.request_refresh_guesses()
         return {"ok": True}
 
     @app.post("/api/persons/{slug}/faces/{fname}/unassign")
