@@ -120,3 +120,27 @@ class RefreshGuessesConcurrencyTests(unittest.TestCase):
         _os.chmod(jf, 0o644)
         self.gal.refresh_guesses()
         self.assertEqual(_stat.S_IMODE(_os.stat(jf).st_mode), 0o644)
+
+    def test_an_unknown_deleted_during_the_pass_is_not_resurrected(self):
+        # Der Hintergrundlauf laeuft neben den Handlern: wird ein Unknown waehrend
+        # des Durchlaufs zugeordnet oder verworfen, darf os.replace() es nicht wieder
+        # anlegen — es stuende sonst ohne Bild erneut in der Review-Queue.
+        self._unknown("u1")
+        jf = self.gal.unknown_dir / "u1.json"
+        (self.gal.unknown_dir / "u1.jpg").write_bytes(b"jpg")
+        real_match = self.gal.match
+
+        def match_and_delete(emb):
+            # Genau das, was discard_unknown()/assign_unknown() tun wuerden.
+            jf.unlink(missing_ok=True)
+            (self.gal.unknown_dir / "u1.jpg").unlink(missing_ok=True)
+            return real_match(emb)
+
+        self.gal.match = match_and_delete
+        try:
+            self.gal.refresh_guesses()
+        finally:
+            self.gal.match = real_match
+        self.assertFalse(jf.exists(), "ein geloeschtes Unknown darf nicht zurueckkommen")
+        self.assertEqual([p.name for p in self.gal.unknown_dir.iterdir()], [],
+                         "und auch keine Temp-Datei hinterlassen")

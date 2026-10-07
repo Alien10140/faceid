@@ -1091,13 +1091,24 @@ class Gallery:
                     # Verlust, gegen den das Ersetzen hier antritt.
                     fh.flush()
                     os.fsync(fh.fileno())
-                # mkstemp legt mit 0600 an, und os.replace nimmt den Modus mit — die
-                # Datei waere danach nur noch fuer den Dienstnutzer lesbar. Den Modus
-                # des Ziels uebernehmen, sonst die uebliche Vorgabe.
+                # Ist das Ziel inzwischen weg, wurde dieses Unknown waehrend des
+                # Durchlaufs zugeordnet oder verworfen. os.replace() wuerde es
+                # wieder anlegen — ohne Bild, mit veralteten Daten, und es staende
+                # erneut in der Review-Queue. Der Hintergrundlauf macht dieses
+                # Fenster erst gross, weil er neben den Handlern laeuft.
                 try:
-                    os.chmod(tmp, stat_module.S_IMODE(os.stat(jf).st_mode))
-                except OSError:
-                    os.chmod(tmp, 0o644)
+                    mode = stat_module.S_IMODE(os.stat(jf).st_mode)
+                except FileNotFoundError:
+                    tmp.unlink(missing_ok=True)
+                    continue
+                # mkstemp legt mit 0600 an, und os.replace nimmt den Modus mit — die
+                # Datei waere danach nur noch fuer den Dienstnutzer lesbar.
+                os.chmod(tmp, mode)
+                # Kurz vor dem Tausch noch einmal nachsehen: das Fenster bleibt,
+                # aber es schrumpft von "ganzer Schreibvorgang" auf zwei Aufrufe.
+                if not jf.exists():
+                    tmp.unlink(missing_ok=True)
+                    continue
                 os.replace(tmp, jf)
                 changed = True
             except OSError:
