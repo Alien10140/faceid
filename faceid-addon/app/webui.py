@@ -77,6 +77,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     @app.delete("/api/persons/{slug}")
     def delete_person(slug: str):
         gallery.delete_person(slug)
+        gallery.request_refresh_guesses()
         return {"ok": True}
 
     class FavBody(BaseModel):
@@ -149,6 +150,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         if not gallery.set_aside(slug, fname, body.reason):
             raise HTTPException(404, "unknown person or photo")
         log.info("%s/%s set aside — %s", slug, fname, body.reason)
+        gallery.request_refresh_guesses()
         return {"ok": True}
 
     @app.post("/api/persons/{slug}/rename")
@@ -169,7 +171,10 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
 
     @app.post("/api/persons/{slug}/trimmed/{fname}/restore")
     def restore_trimmed(slug: str, fname: str):
-        return {"ok": gallery.restore_trimmed(slug, fname)}
+        ok = gallery.restore_trimmed(slug, fname)
+        if ok:
+            gallery.request_refresh_guesses()
+        return {"ok": ok}
 
     @app.delete("/api/persons/{slug}/trimmed/{fname}")
     def delete_trimmed(slug: str, fname: str):
@@ -188,12 +193,15 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         # zuerst echte Bild-Dubletten (identisches Foto), dann aehnliche Gesichter
         pix = gallery.deduplicate_pixels_all(dry_run=dry)
         emb = gallery.deduplicate_all(thr, dry_run=dry)
+        if not dry and (pix or emb):
+            gallery.request_refresh_guesses()
         key = "would_remove" if dry else "moved"
         return {key: pix + emb, "same_image": pix, "similar_face": emb, "threshold": thr}
 
     @app.delete("/api/persons/{slug}/faces/{fname}")
     def delete_face(slug: str, fname: str):
         gallery.delete_face(slug, fname)
+        gallery.request_refresh_guesses()
         return {"ok": True}
 
     @app.post("/api/persons/{slug}/faces/{fname}/unassign")
@@ -316,7 +324,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         thr = float(cfg["faceid"].get("match_threshold", 0.5))
         assigned: dict[str, int] = {}
         for it in gallery.unknowns():
-            slug, name, score = gallery.match(it["embedding"])
+            slug, name, score, _top = gallery.match(it["embedding"])
             if slug and score >= thr and gallery.assign_unknown(it["id"], slug):
                 assigned[name] = assigned.get(name, 0) + 1
                 if getattr(processor.frigate, "enabled", True) and it.get("event_id"):

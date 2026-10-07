@@ -3,6 +3,10 @@
 All notable changes to FaceID. The Home Assistant app shows this file in the
 update dialog; standalone users can watch GitHub releases.
 
+## Unreleased
+
+- **Looks-like cues show the gallery face.** Unknown review now stores `guess_top_slug` + `guess_top_photo` (the reference that best explains a guess) and shows a thumbnail next to *looks like* / ★ Looks like headers; hover enlarges, click opens the existing full viewer. Keys are omitted when there is no photo; deleting or setting aside a reference photo refreshes dangling cues.
+
 ## 0.25.1 — 2026-10-06
 
 - **A failed assignment no longer leaves an empty person behind.** Assigning faces created

@@ -20,7 +20,7 @@ class FakeFrigate:
 
 
 class FakeGallery:
-    def __init__(self, match=(None, None, 0.0), ignored=0.0):
+    def __init__(self, match=(None, None, 0.0, None), ignored=0.0):
         self.match_result = match
         self.ignored = ignored
         self.saved = []
@@ -74,7 +74,7 @@ class LocalEventProcessorTests(unittest.TestCase):
 
     def test_known_person_does_not_try_to_write_a_frigate_label(self):
         frigate = FakeFrigate()
-        gallery = FakeGallery(match=("alice", "Alice", 0.8))
+        gallery = FakeGallery(match=("alice", "Alice", 0.8, None))
         processor = EventProcessor(config(), object(), gallery, frigate)
         image = np.zeros((100, 100, 3), dtype=np.uint8)
         result = processor.process_local_face(

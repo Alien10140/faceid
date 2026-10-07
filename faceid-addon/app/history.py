@@ -283,7 +283,7 @@ class History:
             if gallery is not None and m.get("embedding"):
                 try:
                     emb = np.array(m["embedding"], dtype=np.float32)
-                    _, name, score = gallery.match(emb)
+                    _, name, score, _top = gallery.match(emb)
                     # Nur einen Treffer zeigen, der auch veroeffentlicht wuerde. match()
                     # liefert immer den besten Kandidaten, auch bei 0.13 — das als
                     # "heute waere das X" anzuzeigen waere genau die irrefuehrende Angabe,

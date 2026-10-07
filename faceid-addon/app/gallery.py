@@ -5,9 +5,12 @@ Kein Training, kein Overfitting: jedes Bild ist ein eigener Vergleichspunkt.
 """
 import hashlib
 import json
+import os
 import logging
 import re
 import shutil
+import stat as stat_module
+import tempfile
 import threading
 import time
 import unicodedata
@@ -65,6 +68,13 @@ class Gallery:
         self.self_outlier_min_photos = 5  # darunter ist der Median nicht belastbar
         self.dedupe_threshold = 0.65  # ab hier gilt ein Foto als Duplikat (Hover-Highlight + Dedup)
         self._lock = threading.Lock()
+        self._refresh_sched_lock = threading.Lock()
+        self._refresh_deadline = None
+        self._refresh_first_request = None
+        self._refresh_thread = None
+        # Eigenes Lock, nicht self._lock: refresh_guesses ruft match(), und match()
+        # nimmt self._lock — unter demselben Lock waere das ein Deadlock.
+        self._refresh_run_lock = threading.Lock()
         self._cache = {}  # slug -> {"name":..., "emb": np.ndarray, "files": [...]}
         self._ign_emb = np.zeros((0, 512), dtype=np.float32)
         self._ign_ids: list[str] = []
@@ -746,11 +756,13 @@ class Gallery:
     # ---------- Matching ----------
 
     def match(self, embedding: np.ndarray):
-        """-> (slug, name, score) der besten Person oder (None, None, best_score).
+        """-> (slug, name, score, top_photo) der besten Person oder (None, None, best_score, None).
         Score = Mittel der Top-k Ähnlichkeiten pro Person (statt Max) — eine Person
-        mit vielen Referenzbildern gewinnt Grenzfälle nicht mehr per Einzel-Ausreißer."""
+        mit vielen Referenzbildern gewinnt Grenzfälle nicht mehr per Einzel-Ausreißer.
+        top_photo = Dateiname mit der höchsten Einzel-Ähnlichkeit bei der Gewinner-Person
+        (für die Unknown-UI „looks like“-Vorschau)."""
         with self._lock:
-            best = (None, None, 0.0)
+            best = (None, None, 0.0, None)
             for slug, e in self._cache.items():
                 if len(e["files"]) == 0:
                     continue
@@ -758,7 +770,11 @@ class Gallery:
                 k = min(self.top_k, len(sims))
                 score = float(np.sort(sims)[-k:].mean())
                 if score > best[2]:
-                    best = (slug, e["name"], score)
+                    # Thumbnail = best *single* photo (argmax), not one of the top-k
+                    # that entered the mean score — clearest face for the UI cue.
+                    # files[i] aligns with emb[i] / sims[i] from the same person load.
+                    top_i = int(np.argmax(sims))
+                    best = (slug, e["name"], score, e["files"][top_i])
             return best
 
     # ---------- Ignore-Liste (Negativ-Anker) ----------
@@ -1030,15 +1046,140 @@ class Gallery:
         return True
 
     def refresh_guesses(self):
-        """Verbleibende Unknowns gegen die aktuelle Galerie neu bewerten (nach Zuordnungen)."""
+        """Verbleibende Unknowns gegen die aktuelle Galerie neu bewerten (nach Zuordnungen).
+
+        Laeuft serialisiert: der Hintergrund-Worker und ein Request-Handler koennen
+        sonst gleichzeitig durchlaufen, und zwei Durchgaenge am selben Unknown
+        verschraenken sich zu "A schreibt halb, B ersetzt" — dann wird genau die
+        abgeschnittene Datei zur echten, die das atomare Ersetzen verhindern soll.
+        """
+        with self._refresh_run_lock:
+            self._refresh_guesses_once()
+
+    def _refresh_guesses_once(self):
+        changed = False
         for jf in self.unknown_dir.glob("*.json"):
             try:
                 m = json.loads(jf.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
-            _, name, score = self.match(np.array(m["embedding"], dtype=np.float32))
+            slug, name, score, top_photo = self.match(np.array(m["embedding"], dtype=np.float32))
             m["guess"], m["guess_score"] = name, round(float(score), 3)
-            jf.write_text(json.dumps(m, ensure_ascii=False))
+            # Persist slug+file together so the UI does not re-derive the person
+            # folder from the display name (rename / duplicate / slugify drift).
+            if slug and top_photo:
+                m["guess_top_photo"] = top_photo
+                m["guess_top_slug"] = slug
+            else:
+                m.pop("guess_top_photo", None)
+                m.pop("guess_top_slug", None)
+            # Atomic replace — a crashed mid-write would otherwise truncate the
+            # JSON (and the embedding inside it) for a silent loss on next load.
+            raw = json.dumps(m, ensure_ascii=False)
+            # Eindeutiger Name je Schreibvorgang: ein fester "<uid>.json.tmp" waere
+            # fuer alle Schreiber derselbe Pfad. Der Rest des Programms sieht ihn
+            # nie, weil hier nur "*.json" gelesen wird.
+            fd, tmp_name = tempfile.mkstemp(dir=self.unknown_dir,
+                                            prefix=f".{jf.stem}-", suffix=".tmp")
+            tmp = Path(tmp_name)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(raw)
+                    # Ohne flush+fsync darf das Dateisystem den Namenstausch vor die
+                    # Daten ziehen: nach einem Stromausfall steht dann eine leere Datei
+                    # da, wo vorher ein vollstaendiges Embedding war. Genau der stille
+                    # Verlust, gegen den das Ersetzen hier antritt.
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                # Ist das Ziel inzwischen weg, wurde dieses Unknown waehrend des
+                # Durchlaufs zugeordnet oder verworfen. os.replace() wuerde es
+                # wieder anlegen — ohne Bild, mit veralteten Daten, und es staende
+                # erneut in der Review-Queue. Der Hintergrundlauf macht dieses
+                # Fenster erst gross, weil er neben den Handlern laeuft.
+                try:
+                    mode = stat_module.S_IMODE(os.stat(jf).st_mode)
+                except FileNotFoundError:
+                    tmp.unlink(missing_ok=True)
+                    continue
+                # mkstemp legt mit 0600 an, und os.replace nimmt den Modus mit — die
+                # Datei waere danach nur noch fuer den Dienstnutzer lesbar.
+                os.chmod(tmp, mode)
+                # Kurz vor dem Tausch noch einmal nachsehen: das Fenster bleibt,
+                # aber es schrumpft von "ganzer Schreibvorgang" auf zwei Aufrufe.
+                if not jf.exists():
+                    tmp.unlink(missing_ok=True)
+                    continue
+                os.replace(tmp, jf)
+                changed = True
+            except OSError:
+                # Nichts halb Geschriebenes zuruecklassen, auch nicht als Muell.
+                tmp.unlink(missing_ok=True)
+                raise
+        if changed:
+            self._fsync_unknown_dir()
+
+    def _fsync_unknown_dir(self):
+        """Einmal je Durchlauf, nicht je Datei: erst damit ist der Namenstausch
+        selbst dauerhaft, und ein fsync je Unknown waere bei tausenden Eintraegen
+        der teuerste Teil des Durchlaufs."""
+        try:
+            fd = os.open(self.unknown_dir, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+
+    def request_refresh_guesses(self, delay: float = 0.4, max_delay: float = 2.0):
+        """Coalesce refresh_guesses from request handlers (delete / set-aside / dedupe).
+
+        Each refresh re-matches every unknown; firing it once per deleted photo
+        is O(N × unknowns) on the HTTP thread. A short debounce collapses a
+        cleanup burst into one background pass.
+        """
+        with self._refresh_sched_lock:
+            now = time.time()
+            if self._refresh_first_request is None:
+                self._refresh_first_request = now
+            # Obergrenze gegen den Dauerstrom: rein nachlaufend wuerde ein Burst
+            # (Mehrfach-Loeschen, Dedupe-Schleife) die Aktualisierung so lange
+            # schieben, wie er dauert — die Oberflaeche zeigt derweil Hinweise auf
+            # Fotos, die es nicht mehr gibt.
+            self._refresh_deadline = min(now + delay,
+                                         self._refresh_first_request + max_delay)
+            if self._refresh_thread is not None and self._refresh_thread.is_alive():
+                return
+            t = threading.Thread(target=self._refresh_guesses_worker, name="refresh-guesses",
+                                 daemon=True)
+            self._refresh_thread = t
+            t.start()
+
+    def _refresh_guesses_worker(self):
+        while True:
+            with self._refresh_sched_lock:
+                deadline = self._refresh_deadline
+            if deadline is None:
+                return
+            wait = deadline - time.time()
+            if wait > 0:
+                time.sleep(wait)
+                continue
+            with self._refresh_sched_lock:
+                if self._refresh_deadline is not None and time.time() < self._refresh_deadline:
+                    continue
+                self._refresh_deadline = None
+                self._refresh_first_request = None
+            try:
+                self.refresh_guesses()
+            except Exception:
+                log.exception("background refresh_guesses failed")
+            with self._refresh_sched_lock:
+                if self._refresh_deadline is None:
+                    self._refresh_thread = None
+                    return
 
     def discard_unknown(self, uid: str):
         (self.unknown_dir / f"{uid}.json").unlink(missing_ok=True)

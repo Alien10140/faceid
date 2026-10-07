@@ -68,7 +68,8 @@ opened read-only and never changed.
 *All faces below are AI-generated (StyleGAN) — no real persons.*
 
 **Unknown review** — new faces arrive auto-clustered; assign a whole cluster with one
-click, or scan your camera history to bootstrap the gallery:
+click, or scan your camera history to bootstrap the gallery. A *looks like* guess shows
+that person's gallery reference photo beside the name (hover to enlarge):
 
 ![Unknown review with auto-clustered faces](docs/screenshot-unknowns.png)
 
