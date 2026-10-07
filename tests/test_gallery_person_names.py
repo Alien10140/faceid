@@ -109,3 +109,14 @@ class RefreshGuessesConcurrencyTests(unittest.TestCase):
         self.assertIsNotNone(deadline)
         self.assertLessEqual(deadline - start, 0.35,
                              "die Obergrenze muss den Dauerstrom abschneiden")
+
+    def test_the_file_mode_survives_a_refresh(self):
+        # mkstemp legt mit 0600 an und os.replace nimmt den Modus mit — ohne
+        # Korrektur waere die Datei nach dem ersten Durchlauf nur noch fuer den
+        # Dienstnutzer lesbar.
+        self._unknown("u1")
+        jf = self.gal.unknown_dir / "u1.json"
+        import os as _os, stat as _stat
+        _os.chmod(jf, 0o644)
+        self.gal.refresh_guesses()
+        self.assertEqual(_stat.S_IMODE(_os.stat(jf).st_mode), 0o644)

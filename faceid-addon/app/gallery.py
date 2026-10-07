@@ -9,6 +9,7 @@ import os
 import logging
 import re
 import shutil
+import stat as stat_module
 import tempfile
 import threading
 import time
@@ -1056,6 +1057,7 @@ class Gallery:
             self._refresh_guesses_once()
 
     def _refresh_guesses_once(self):
+        changed = False
         for jf in self.unknown_dir.glob("*.json"):
             try:
                 m = json.loads(jf.read_text())
@@ -1083,11 +1085,42 @@ class Gallery:
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     fh.write(raw)
+                    # Ohne flush+fsync darf das Dateisystem den Namenstausch vor die
+                    # Daten ziehen: nach einem Stromausfall steht dann eine leere Datei
+                    # da, wo vorher ein vollstaendiges Embedding war. Genau der stille
+                    # Verlust, gegen den das Ersetzen hier antritt.
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                # mkstemp legt mit 0600 an, und os.replace nimmt den Modus mit — die
+                # Datei waere danach nur noch fuer den Dienstnutzer lesbar. Den Modus
+                # des Ziels uebernehmen, sonst die uebliche Vorgabe.
+                try:
+                    os.chmod(tmp, stat_module.S_IMODE(os.stat(jf).st_mode))
+                except OSError:
+                    os.chmod(tmp, 0o644)
                 os.replace(tmp, jf)
+                changed = True
             except OSError:
                 # Nichts halb Geschriebenes zuruecklassen, auch nicht als Muell.
                 tmp.unlink(missing_ok=True)
                 raise
+        if changed:
+            self._fsync_unknown_dir()
+
+    def _fsync_unknown_dir(self):
+        """Einmal je Durchlauf, nicht je Datei: erst damit ist der Namenstausch
+        selbst dauerhaft, und ein fsync je Unknown waere bei tausenden Eintraegen
+        der teuerste Teil des Durchlaufs."""
+        try:
+            fd = os.open(self.unknown_dir, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
 
     def request_refresh_guesses(self, delay: float = 0.4, max_delay: float = 2.0):
         """Coalesce refresh_guesses from request handlers (delete / set-aside / dedupe).
