@@ -3,9 +3,26 @@
 All notable changes to FaceID. The Home Assistant app shows this file in the
 update dialog; standalone users can watch GitHub releases.
 
-## Unreleased
+## 0.26.0 — 2026-10-07
 
-- **Looks-like cues show the gallery face.** Unknown review now stores `guess_top_slug` + `guess_top_photo` (the reference that best explains a guess) and shows a thumbnail next to *looks like* / ★ Looks like headers; hover enlarges, click opens the existing full viewer. Keys are omitted when there is no photo; deleting or setting aside a reference photo refreshes dangling cues.
+- **Looks-like cues show the gallery face.** Unknown review now stores `guess_top_slug` +
+  `guess_top_photo` (the reference that best explains a guess) and shows a thumbnail next to
+  *looks like* / ★ Looks like headers; hover enlarges, click opens the existing full viewer.
+  Keys are omitted when there is no photo; deleting or setting aside a reference photo
+  refreshes dangling cues. Contributed by @Alien10140.
+- **Cue refreshes no longer run once per request.** Deleting, setting aside, restoring and
+  deduplicating photos each used to re-match every unknown on the HTTP thread. They now
+  schedule one debounced background pass instead, so a cleanup burst costs a single pass. The
+  visible difference: cues update a moment later rather than instantly, and at most
+  `max_delay` (2 s) after the first request in a burst, so a long stream of deletions cannot
+  defer them indefinitely. Assign, unassign and ignore still refresh immediately, because
+  those are the actions where the review list must be right the moment it reloads.
+- **The unknown metadata is written safely.** Each file is written to a unique temporary name
+  and moved into place, with `flush` + `fsync` before the move and the directory synced once
+  per pass — a half-written file can no longer become the real one, and a power cut cannot
+  leave a zero-length file where an embedding was. The pass runs under its own lock, the
+  file's permissions are preserved, and an unknown that was assigned or discarded mid-pass is
+  no longer recreated as an entry without an image.
 
 ## 0.25.1 — 2026-10-06
 
