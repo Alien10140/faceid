@@ -9,6 +9,7 @@ import os
 import logging
 import re
 import shutil
+import tempfile
 import threading
 import time
 import unicodedata
@@ -68,7 +69,11 @@ class Gallery:
         self._lock = threading.Lock()
         self._refresh_sched_lock = threading.Lock()
         self._refresh_deadline = None
+        self._refresh_first_request = None
         self._refresh_thread = None
+        # Eigenes Lock, nicht self._lock: refresh_guesses ruft match(), und match()
+        # nimmt self._lock — unter demselben Lock waere das ein Deadlock.
+        self._refresh_run_lock = threading.Lock()
         self._cache = {}  # slug -> {"name":..., "emb": np.ndarray, "files": [...]}
         self._ign_emb = np.zeros((0, 512), dtype=np.float32)
         self._ign_ids: list[str] = []
@@ -1040,7 +1045,17 @@ class Gallery:
         return True
 
     def refresh_guesses(self):
-        """Verbleibende Unknowns gegen die aktuelle Galerie neu bewerten (nach Zuordnungen)."""
+        """Verbleibende Unknowns gegen die aktuelle Galerie neu bewerten (nach Zuordnungen).
+
+        Laeuft serialisiert: der Hintergrund-Worker und ein Request-Handler koennen
+        sonst gleichzeitig durchlaufen, und zwei Durchgaenge am selben Unknown
+        verschraenken sich zu "A schreibt halb, B ersetzt" — dann wird genau die
+        abgeschnittene Datei zur echten, die das atomare Ersetzen verhindern soll.
+        """
+        with self._refresh_run_lock:
+            self._refresh_guesses_once()
+
+    def _refresh_guesses_once(self):
         for jf in self.unknown_dir.glob("*.json"):
             try:
                 m = json.loads(jf.read_text())
@@ -1059,11 +1074,22 @@ class Gallery:
             # Atomic replace — a crashed mid-write would otherwise truncate the
             # JSON (and the embedding inside it) for a silent loss on next load.
             raw = json.dumps(m, ensure_ascii=False)
-            tmp = jf.with_suffix(".json.tmp")
-            tmp.write_text(raw)
-            os.replace(tmp, jf)
+            # Eindeutiger Name je Schreibvorgang: ein fester "<uid>.json.tmp" waere
+            # fuer alle Schreiber derselbe Pfad. Der Rest des Programms sieht ihn
+            # nie, weil hier nur "*.json" gelesen wird.
+            fd, tmp_name = tempfile.mkstemp(dir=self.unknown_dir,
+                                            prefix=f".{jf.stem}-", suffix=".tmp")
+            tmp = Path(tmp_name)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(raw)
+                os.replace(tmp, jf)
+            except OSError:
+                # Nichts halb Geschriebenes zuruecklassen, auch nicht als Muell.
+                tmp.unlink(missing_ok=True)
+                raise
 
-    def request_refresh_guesses(self, delay: float = 0.4):
+    def request_refresh_guesses(self, delay: float = 0.4, max_delay: float = 2.0):
         """Coalesce refresh_guesses from request handlers (delete / set-aside / dedupe).
 
         Each refresh re-matches every unknown; firing it once per deleted photo
@@ -1071,7 +1097,15 @@ class Gallery:
         cleanup burst into one background pass.
         """
         with self._refresh_sched_lock:
-            self._refresh_deadline = time.time() + delay
+            now = time.time()
+            if self._refresh_first_request is None:
+                self._refresh_first_request = now
+            # Obergrenze gegen den Dauerstrom: rein nachlaufend wuerde ein Burst
+            # (Mehrfach-Loeschen, Dedupe-Schleife) die Aktualisierung so lange
+            # schieben, wie er dauert — die Oberflaeche zeigt derweil Hinweise auf
+            # Fotos, die es nicht mehr gibt.
+            self._refresh_deadline = min(now + delay,
+                                         self._refresh_first_request + max_delay)
             if self._refresh_thread is not None and self._refresh_thread.is_alive():
                 return
             t = threading.Thread(target=self._refresh_guesses_worker, name="refresh-guesses",
@@ -1093,6 +1127,7 @@ class Gallery:
                 if self._refresh_deadline is not None and time.time() < self._refresh_deadline:
                     continue
                 self._refresh_deadline = None
+                self._refresh_first_request = None
             try:
                 self.refresh_guesses()
             except Exception:
