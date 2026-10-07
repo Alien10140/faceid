@@ -82,7 +82,6 @@ update dialog; standalone users can watch GitHub releases.
   wrote them into the generated config — the same defect as #24, in three more fields. Found
   by a new test that checks every option reaches the generated file.
 
-
 ## 0.24.0 — 2026-09-15
 
 - **The folder input no longer remembers every file forever.** `data/folder_ingest.json`
