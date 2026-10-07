@@ -102,10 +102,13 @@ def run_backfill(engine, gallery, frigate, frigate_url: str, days: int = 14,
                     stats["hires"] = stats.get("hires", 0) + 1
         uid = gallery.save_unknown(
             crop, save_emb,
-            {"camera": ev["camera"], "event_id": ev["id"], "backfill": True,
+            {k: v for k, v in {
+             "camera": ev["camera"], "event_id": ev["id"], "backfill": True,
              "event_ts": ev.get("start_time"),  # wann es passierte, nicht wann wir es fanden
              "guess": name, "guess_score": round(float(score), 3),
-             "guess_top_photo": top_photo},
+             "guess_top_photo": top_photo,
+             "guess_top_slug": slug,
+            }.items() if k not in ("guess_top_photo", "guess_top_slug") or v},
             dedupe_sim=dedupe, full_bgr=full,
         )
         stats["dupe" if uid is None else "faces"] += 1

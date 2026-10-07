@@ -1042,12 +1042,16 @@ class Gallery:
                 m = json.loads(jf.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
-            _, name, score, top_photo = self.match(np.array(m["embedding"], dtype=np.float32))
+            slug, name, score, top_photo = self.match(np.array(m["embedding"], dtype=np.float32))
             m["guess"], m["guess_score"] = name, round(float(score), 3)
-            if top_photo:
+            # Persist slug+file together so the UI does not re-derive the person
+            # folder from the display name (rename / duplicate / slugify drift).
+            if slug and top_photo:
                 m["guess_top_photo"] = top_photo
+                m["guess_top_slug"] = slug
             else:
                 m.pop("guess_top_photo", None)
+                m.pop("guess_top_slug", None)
             jf.write_text(json.dumps(m, ensure_ascii=False))
 
     def discard_unknown(self, uid: str):

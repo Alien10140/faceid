@@ -191,6 +191,7 @@ function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','
 function guessPhoto(slug, preferred){
   const p=persons[slug]; if(!p||!p.files||!p.files.length)return '';
   if(preferred&&p.files.includes(preferred))return preferred;
+  // preferred missing (trimmed/deleted) → newest remaining file
   return p.files[p.files.length-1];
 }
 function guessCue(name, scorePct, slug, preferred, star){
@@ -205,8 +206,9 @@ function guessCue(name, scorePct, slug, preferred, star){
   const src=`data/persons/${esc(slug)}/${esc(file)}`;
   const thumb=`<img class="guess-thumb" src="${src}" loading="lazy" alt=""
     data-url="${src}" data-cap="${esc(name)}"
+    onerror="this.style.display='none'"
     onclick="event.stopPropagation();showFull(this.dataset.url,this.dataset.cap)">`;
-  const pop=`<span class="guess-pop"><img src="${src}" alt=""><div class="cap">${esc(name)}</div></span>`;
+  const pop=`<span class="guess-pop"><img src="${src}" alt="" onerror="this.parentNode.style.display='none'"><div class="cap">${esc(name)}</div></span>`;
   if(star){
     return `<span class="guess"><b style="color:var(--acc)">★ Looks like ${esc(name)}</b>${thumb}${pop}</span>`;
   }
@@ -329,7 +331,7 @@ async function renderUnknowns(){
     return `
     <div class="cluster sugg" data-sg="${gi}">
       <div class="head">
-        ${guessCue(g.name, null, g.slug, (g.items[0]&&g.items[0].guess_top_photo)||'', true)}
+        ${guessCue(g.name, null, (g.items[0]&&g.items[0].guess_top_slug)||g.slug, (g.items[0]&&g.items[0].guess_top_photo)||'', true)}
         <span class="stat">${g.items.length} face(s) · avg ${avg}%</span>
         <span style="flex:1"></span>
         <select id="ssel${gi}" title="assign to a different person instead">${personOptions(g.slug)}</select>
@@ -354,7 +356,7 @@ async function renderUnknowns(){
       <div class="head">
         <b>CLUSTER ${String(i+1).padStart(2,'0')}</b>
         <span class="stat">${c.length} capture${c.length>1?'s':''} · ${esc(c[0].camera||'')}</span>
-        ${c[0].guess?guessCue(c[0].guess,(c[0].guess_score*100|0),gslug,c[0].guess_top_photo||'',false):''}
+        ${c[0].guess?guessCue(c[0].guess,(c[0].guess_score*100|0),c[0].guess_top_slug||gslug,c[0].guess_top_photo||'',false):''}
         <span style="flex:1"></span>
         <select id="sel${i}" title="assign to an existing person"><option value="">— pick person —</option>${personOptions(gslug)}</select>
         <input id="new${i}" placeholder="…exact name, or Track as new label" size="18" title="ASSIGN: exact new name only (not with a dropdown pick). Track as new: optional role label → Label-xxxxxx (empty → Unnamed-xxxxxx)">
