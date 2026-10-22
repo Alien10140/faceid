@@ -13,7 +13,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import FastAPI, HTTPException, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -68,7 +68,8 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     def _enqueue_sub_label(event_id, name, score):
         if not event_id:
             return
-        if not getattr(processor.frigate, "enabled", True):
+        frigate = getattr(processor, "frigate", None)
+        if not frigate or not getattr(frigate, "enabled", False):
             return
         sub_label_q.put((event_id, name, score))
 
@@ -91,13 +92,19 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     def index():
         return FileResponse(static_dir / "index.html")
 
+    def _send_static(name: str, media_type: str):
+        path = static_dir / name
+        if not path.is_file():
+            raise HTTPException(404)
+        return FileResponse(path, media_type=media_type)
+
     @app.get("/favicon.svg")
     def favicon_svg():
-        return FileResponse(static_dir / "favicon.svg", media_type="image/svg+xml")
+        return _send_static("favicon.svg", "image/svg+xml")
 
     @app.get("/favicon.ico")
     def favicon_ico():
-        return FileResponse(static_dir / "favicon.ico", media_type="image/x-icon")
+        return _send_static("favicon.ico", "image/x-icon")
 
     @app.get("/api/persons")
     def persons():
@@ -242,7 +249,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         ok = gallery.unassign_face(slug, fname)
         if ok:
             gallery.request_refresh_guesses()
-        return {"ok": ok}
+        return {"ok": ok, **_guess_flags()}
 
     @app.post("/api/persons/{slug}/ignore")
     def ignore_person(slug: str):
@@ -250,7 +257,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         n = gallery.ignore_person(slug)
         if n:
             gallery.request_refresh_guesses()
-        return {"ignored_faces": n}
+        return {"ignored_faces": n, **_guess_flags()}
 
     @app.post("/api/persons/{slug}/photos")
     async def upload_photos(slug: str, files: list[UploadFile]):

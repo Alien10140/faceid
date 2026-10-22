@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+from fastapi import HTTPException
+
 from app.gallery import Gallery
 from app.webui import AssignBody, build_app
 
@@ -23,22 +25,24 @@ def _gallery(tmp: Path) -> Gallery:
     return Gallery(tmp, top_k=3, max_per_person=40)
 
 
-def _app(tmp: Path, frigate=None):
+def _app(tmp: Path, frigate=..., static_dir=None):
     data = tmp / "data"
     gallery = _gallery(data)
     cfg = {"faceid": {"match_threshold": 0.5, "unknown_threshold": 0.35,
                       "suggest_threshold": 0.4, "cluster_eps": 0.55,
                       "ignore_threshold": 0.5, "dedupe_threshold": 0.65},
            "folder": {"enabled": False}, "frigate": {"url": ""}, "mqtt": {}}
+    if frigate is ...:
+        frigate = SimpleNamespace(enabled=False)
     proc = SimpleNamespace(_announced=set(), match_thr=0.5, unknown_thr=0.35,
                            ignore_thr=0.5, history=None, logbuffer=None,
-                           frigate=frigate or SimpleNamespace(enabled=False),
+                           frigate=frigate,
                            folder_ingest=SimpleNamespace(status=lambda: {},
                                                          max_indexed_files=5000,
                                                          enabled=False),
                            queue=SimpleNamespace(qsize=lambda: 0),
                            events={})
-    app = build_app(cfg, None, gallery, proc, data, Path("static"))
+    app = build_app(cfg, None, gallery, proc, data, Path(static_dir or "static"))
     return app, gallery, proc
 
 
@@ -200,6 +204,72 @@ class SubLabelOffHandlerClockTests(unittest.TestCase):
             self.assertEqual(slow[0][0], "evt-1")
         finally:
             tmp.cleanup()
+
+
+class ReviewFollowUpTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.app, self.gallery, self.proc = _app(Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _wait_idle(self, timeout=2.0):
+        deadline = time.time() + timeout
+        while self.gallery.guesses_refreshing and time.time() < deadline:
+            time.sleep(0.03)
+        self.assertFalse(self.gallery.guesses_refreshing)
+
+    def test_failed_background_pass_clears_refreshing_without_stamping_success(self):
+        self.gallery._guesses_updated_ts = 0.0
+        def boom():
+            raise RuntimeError("disk full")
+        self.gallery.refresh_guesses = boom
+        self.gallery.request_refresh_guesses(delay=0.01, max_delay=0.01)
+        self._wait_idle()
+        self.assertEqual(self.gallery.guesses_updated_ts, 0.0)
+
+    def test_successful_background_pass_stamps_updated_ts(self):
+        self.gallery._guesses_updated_ts = 0.0
+        self.gallery.request_refresh_guesses(delay=0.01, max_delay=0.01)
+        self._wait_idle()
+        self.assertGreater(self.gallery.guesses_updated_ts, 0.0)
+
+    def test_unassign_and_ignore_person_return_guess_flags(self):
+        slug = self.gallery.create_person("Juli")
+        crop = np.full((80, 80, 3), 127, dtype=np.uint8)
+        fname = self.gallery.add_face(slug, crop, _emb(), source={"camera": "entrance"})
+        unassign = _route(self.app, "/api/persons/{slug}/faces/{fname}/unassign")
+        r = unassign(slug, fname)
+        self.assertTrue(r["ok"])
+        self.assertIn("guesses_epoch", r)
+        self.assertIn("guesses_refreshing", r)
+        slug2 = self.gallery.create_person("Quinton")
+        self.gallery.add_face(slug2, crop, _emb(), source={"camera": "entrance"})
+        ignore = _route(self.app, "/api/persons/{slug}/ignore")
+        r2 = ignore(slug2)
+        self.assertGreaterEqual(r2["ignored_faces"], 1)
+        self.assertIn("guesses_epoch", r2)
+        self.assertIn("guesses_refreshing", r2)
+
+    def test_favicon_missing_is_404(self):
+        empty = Path(self.tmp.name) / "nostatic"
+        empty.mkdir()
+        app, _, _ = _app(Path(self.tmp.name) / "other", static_dir=empty)
+        for path in ("/favicon.svg", "/favicon.ico"):
+            with self.assertRaises(HTTPException) as cm:
+                _route(app, path)()
+            self.assertEqual(cm.exception.status_code, 404)
+
+    def test_assign_does_not_enqueue_when_frigate_is_none(self):
+        app, gallery, _proc = _app(Path(self.tmp.name) / "nonefrigate", frigate=None)
+        assign = _route(app, "/api/unknowns/assign")
+        slug = gallery.create_person("Juli")
+        crop = np.full((80, 80, 3), 127, dtype=np.uint8)
+        uid = gallery.save_unknown(
+            crop, _emb(), {"camera": "entrance", "event_id": "evt-none"})
+        r = assign(AssignBody(ids=[uid], person=slug))
+        self.assertEqual(r["assigned"], 1)
 
 
 if __name__ == "__main__":

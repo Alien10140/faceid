@@ -1174,30 +1174,43 @@ class Gallery:
             t.start()
 
     def _refresh_guesses_worker(self):
-        while True:
-            with self._refresh_sched_lock:
-                deadline = self._refresh_deadline
-            if deadline is None:
-                return
-            wait = deadline - time.time()
-            if wait > 0:
-                time.sleep(wait)
-                continue
-            with self._refresh_sched_lock:
-                if self._refresh_deadline is not None and time.time() < self._refresh_deadline:
-                    continue
-                self._refresh_deadline = None
-                self._refresh_first_request = None
-            try:
-                self.refresh_guesses()
-            except Exception:
-                log.exception("background refresh_guesses failed")
-            with self._refresh_sched_lock:
-                if self._refresh_deadline is None:
-                    self._guesses_refreshing = False
-                    self._guesses_updated_ts = time.time()
-                    self._refresh_thread = None
+        try:
+            while True:
+                with self._refresh_sched_lock:
+                    deadline = self._refresh_deadline
+                if deadline is None:
                     return
+                wait = deadline - time.time()
+                if wait > 0:
+                    time.sleep(wait)
+                    continue
+                with self._refresh_sched_lock:
+                    if self._refresh_deadline is not None and time.time() < self._refresh_deadline:
+                        continue
+                    self._refresh_deadline = None
+                    self._refresh_first_request = None
+                try:
+                    self.refresh_guesses()
+                    with self._refresh_sched_lock:
+                        self._guesses_updated_ts = time.time()
+                except Exception:
+                    log.exception("background refresh_guesses failed")
+                with self._refresh_sched_lock:
+                    if self._refresh_deadline is None:
+                        return
+        except Exception:
+            log.exception("refresh-guesses worker crashed")
+        finally:
+            with self._refresh_sched_lock:
+                if self._refresh_thread is threading.current_thread():
+                    self._refresh_thread = None
+                    if self._refresh_deadline is None:
+                        self._guesses_refreshing = False
+                    else:
+                        t = threading.Thread(target=self._refresh_guesses_worker,
+                                             name="refresh-guesses", daemon=True)
+                        self._refresh_thread = t
+                        t.start()
 
     @property
     def guesses_epoch(self) -> int:
