@@ -1131,6 +1131,9 @@ class Gallery:
                 raise
         if changed:
             self._fsync_unknown_dir()
+        with self._refresh_sched_lock:
+            self._guesses_epoch += 1
+            self._guesses_updated_ts = time.time()
 
     def _fsync_unknown_dir(self):
         """Einmal je Durchlauf, nicht je Datei: erst damit ist der Namenstausch
@@ -1156,7 +1159,6 @@ class Gallery:
         """
         with self._refresh_sched_lock:
             now = time.time()
-            self._guesses_epoch += 1
             self._guesses_refreshing = True
             if self._refresh_first_request is None:
                 self._refresh_first_request = now
@@ -1199,8 +1201,6 @@ class Gallery:
                     self._refresh_first_request = None
                 try:
                     self.refresh_guesses()
-                    with self._refresh_sched_lock:
-                        self._guesses_updated_ts = time.time()
                 except Exception:
                     log.exception("background refresh_guesses failed")
                 with self._refresh_sched_lock:

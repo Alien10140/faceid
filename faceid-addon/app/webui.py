@@ -1,4 +1,5 @@
 """Review-UI + JSON-API: Personen verwalten, Unknown-Cluster zuordnen, letzte Erkennungen."""
+import atexit
 import base64
 import io
 import json
@@ -85,6 +86,12 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
                 log.exception("background sub_label failed")
 
     threading.Thread(target=_sub_label_loop, daemon=True, name="faceid-sub-label").start()
+
+    def _warn_undrained_sub_labels():
+        n = sub_label_q.qsize()
+        if n:
+            log.warning("dropping %d queued Frigate sub_label posts on shutdown", n)
+    atexit.register(_warn_undrained_sub_labels)
 
     def _guess_flags():
         return {"guesses_epoch": gallery.guesses_epoch,

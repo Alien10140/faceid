@@ -224,18 +224,22 @@ class ReviewFollowUpTests(unittest.TestCase):
 
     def test_failed_background_pass_clears_refreshing_without_stamping_success(self):
         self.gallery._guesses_updated_ts = 0.0
+        before = self.gallery.guesses_epoch
         def boom():
             raise RuntimeError("disk full")
         self.gallery.refresh_guesses = boom
         self.gallery.request_refresh_guesses(delay=0.01, max_delay=0.01)
         self._wait_idle()
         self.assertEqual(self.gallery.guesses_updated_ts, 0.0)
+        self.assertEqual(self.gallery.guesses_epoch, before)
 
     def test_successful_background_pass_stamps_updated_ts(self):
         self.gallery._guesses_updated_ts = 0.0
+        before = self.gallery.guesses_epoch
         self.gallery.request_refresh_guesses(delay=0.01, max_delay=0.01)
         self._wait_idle()
         self.assertGreater(self.gallery.guesses_updated_ts, 0.0)
+        self.assertGreater(self.gallery.guesses_epoch, before)
 
     def test_unassign_and_ignore_person_return_guess_flags(self):
         slug = self.gallery.create_person("Juli")
