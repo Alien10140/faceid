@@ -10,7 +10,10 @@ update dialog; standalone users can watch GitHub releases.
   rematch after ASSIGN. It now mounts only the cluster cards in view (plus overscan),
   drops assigned tiles locally, and schedules the guess refresh in the background —
   unchanged cue files are not rewritten. Frigate `sub_label` posts no longer block the
-  assign response. Contributed by @Alien10140.
+  assign response. Cluster cards include their bottom margin in the spacer math; a
+  mis-estimated tall cluster cannot teleport the scrollbar. Groups larger than 48 faces
+  still assign/ignore the whole set, but only the first 48 tiles mount. Contributed by
+  @Alien10140.
 - **Unknown review can sort by newest or match %.** The UNKNOWN tab has a `sort:` control
   next to the camera filter (default newest; choice kept in `localStorage`). Suggestion
   groups and rest clusters reorder together, and rest-cluster tiles show the guess score

@@ -147,7 +147,8 @@ td.p{color:var(--acc)} td.u{color:var(--warn)}
   .logwrap{background:var(--panel);border:1px solid var(--line);padding:10px;
            max-height:70vh;overflow:auto}
 
-#unkQueue{height:calc(100dvh - 11.5rem);overflow:auto;margin:0 -16px;padding:0 16px 8px}
+#unkQueue{height:calc(100dvh - 11.5rem);overflow:auto;margin:0 -16px;padding:0 16px 8px;
+  overflow-anchor:none;overscroll-behavior:contain}
 #unkPadTop,#unkPadBot{width:100%;flex:none;pointer-events:none}
 #unkCards .cluster{overflow:visible}
 
@@ -301,16 +302,28 @@ async function startBackfill(){
 let unkRaw=null, unkBf=null, unkRows=[], unkHeights=[], unkPrefix=[];
 let unkDraft=Object.create(null), unkWinKeys='', unkPaintQueued=false;
 let unkStart=0, unkEnd=0, unkSoftTimer=0;
+const UNK_TILE_CAP=48, UNK_SLOT_GAP=14;
 function unkKeyFor(kind, items, name){
   return kind==='sugg' ? 'sugg:'+(name||'') : 'rest:'+items.map(u=>u.id).join('.');
 }
+function unkVisibleItems(row){
+  return row.items.length>UNK_TILE_CAP ? row.items.slice(0,UNK_TILE_CAP) : row.items;
+}
+function unkSlotSize(el){
+  const mb=parseFloat(getComputedStyle(el).marginBottom)||0;
+  return el.getBoundingClientRect().height + mb;
+}
 function estimateUnkHeight(row, width){
-  const gap=6, minTile=96, header=58, chrome=28;
+  const gap=6, minTile=96;
   const inner=Math.max(minTile, (width||640)-24);
   const cols=Math.max(1, Math.floor((inner+gap)/(minTile+gap)));
-  const tileRows=Math.ceil(Math.max(1, row.items.length)/cols);
+  const n=Math.min(row.items.length, UNK_TILE_CAP);
+  const tileRows=Math.ceil(Math.max(1, n)/cols);
   const tile=Math.max(minTile, (inner-(cols-1)*gap)/cols);
-  return header+chrome+tileRows*(tile+gap);
+  // Rest heads wrap person <select> + name field + four actions; suggestion heads stay one line.
+  const header=row.kind==='rest' ? 110 : 52;
+  const extra=row.items.length>UNK_TILE_CAP ? 22 : 0;
+  return header+extra+tileRows*(tile+gap)+UNK_SLOT_GAP;
 }
 function rebuildUnkRows(){
   const excluded=window._excludedIds||(window._excludedIds=new Set());
@@ -391,7 +404,7 @@ function renderUnkCard(row){
         <button class="act" title="assign all faces in this group" onclick="assignSuggestion(this.closest('.cluster').dataset.key)">ASSIGN ALL</button>
         <button class="ghost" style="color:var(--warn);border-color:var(--warn)" title="never notify, match or resurface these faces" onclick="ignoreSuggestion(this.closest('.cluster').dataset.key)">ignore</button>
       </div>
-      <div class="grid">${row.items.map(u=>`
+      <div class="grid">${unkVisibleItems(row).map(u=>`
         <div class="tile" data-id="${esc(u.id)}">
           <img src="data/unknowns/${esc(u.id)}.jpg" decoding="async" alt="">
           <span class="score">${(u.guess_score*100|0)}% · ${fmtWhen(u)}</span>
@@ -399,6 +412,7 @@ function renderUnkCard(row){
           <button class="x" title="not ${esc(row.name)} — pull this face out" onclick="rejectSuggestion('${esc(u.id)}')">×</button>
         </div>`).join('')}
       </div>
+      ${row.items.length>UNK_TILE_CAP?`<div class="stat">${row.items.length-UNK_TILE_CAP} more in this group — ASSIGN ALL still gets all ${row.items.length}</div>`:''}
     </div>`;
   }
   const c=row.items;
@@ -418,13 +432,14 @@ function renderUnkCard(row){
         <button class="ghost" style="color:var(--warn);border-color:var(--warn)" onclick="ignoreCluster(this.closest('.cluster').dataset.key)" title="never notify, match or resurface these faces">ignore</button>
         <button class="ghost" title="delete garbage crops permanently — does NOT stop future matching; use ignore for people" onclick="discardCluster(this.closest('.cluster').dataset.key)">discard</button>
       </div>
-      <div class="grid">${c.map(u=>`
+      <div class="grid">${unkVisibleItems(row).map(u=>`
         <div class="tile" data-id="${esc(u.id)}" title="click to select — actions then apply to the selection only" onclick="this.classList.toggle('sel')">
           <img src="data/unknowns/${esc(u.id)}.jpg" decoding="async" alt="">
           <span class="score">${u.guess_score!=null?(u.guess_score*100|0)+'% · ':''}${fmtWhen(u)}</span>
           ${u.full_url?`<button class="z" title="full snapshot" data-url="${esc(u.full_url)}" data-cap="${esc(u.camera||'')} · ${esc(fmtWhen(u))}" data-fb="data/unknowns/${esc(u.id)}.jpg" onclick="event.stopPropagation();showFull(this.dataset.url,this.dataset.cap,this.dataset.fb)">⛶</button>`:''}
         </div>`).join('')}
       </div>
+      ${c.length>UNK_TILE_CAP?`<div class="stat">${c.length-UNK_TILE_CAP} more in this cluster — ASSIGN / ignore still apply to all ${c.length}</div>`:''}
     </div>`;
 }
 function paintUnkWindow(force){
@@ -449,21 +464,27 @@ function paintUnkWindow(force){
   unkWinKeys=keys;
   cards.innerHTML=unkRows.slice(unkStart,unkEnd).map(renderUnkCard).join('');
   restoreUnkDrafts();
+  // Remeasure for the prefix/scrollbar. Shift scrollTop only for rows whose
+  // old bottom sat fully above the viewport, and clamp the nudge so a
+  // mis-estimated tall cluster cannot teleport the thumb thousands of pixels.
   let deltaAbove=0, changed=false;
   [...cards.querySelectorAll('.cluster')].forEach((el,i)=>{
     const idx=unkStart+i;
-    const h=el.getBoundingClientRect().height;
+    const h=unkSlotSize(el);
     if(!h)return;
     const prev=unkHeights[idx]||h;
     if(Math.abs(h-prev)>1){
-      if(unkPrefix[idx]<top) deltaAbove+=(h-prev);
+      if(unkPrefix[idx]+prev<=top) deltaAbove+=(h-prev);
       unkHeights[idx]=h;
       changed=true;
     }
   });
   if(changed){
     layoutUnkHeights();
-    if(deltaAbove) q.scrollTop=top+deltaAbove;
+    if(deltaAbove){
+      const nudge=Math.max(-120, Math.min(120, deltaAbove));
+      q.scrollTop=top+nudge;
+    }
     padTop.style.height=unkPrefix[unkStart]+'px';
     padBot.style.height=(unkPrefix[unkRows.length]-unkPrefix[unkEnd])+'px';
   }
@@ -538,7 +559,11 @@ async function renderUnknowns(opts){
   const q=$('#unkQueue');
   q.onscroll=()=>{ if(unkPaintQueued)return; unkPaintQueued=true; requestAnimationFrame(()=>{unkPaintQueued=false;paintUnkWindow();}); };
   if(window._unkRO) window._unkRO.disconnect();
-  window._unkRO=new ResizeObserver(()=>{layoutUnkHeights();paintUnkWindow(true);});
+  window._unkRO=new ResizeObserver(()=>{
+    if(unkPaintQueued)return;
+    unkPaintQueued=true;
+    requestAnimationFrame(()=>{unkPaintQueued=false;paintUnkWindow(false);});
+  });
   window._unkRO.observe(q);
   paintUnkWindow(true);
 }
