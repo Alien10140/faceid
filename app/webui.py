@@ -91,6 +91,14 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     def index():
         return FileResponse(static_dir / "index.html")
 
+    @app.get("/favicon.svg")
+    def favicon_svg():
+        return FileResponse(static_dir / "favicon.svg", media_type="image/svg+xml")
+
+    @app.get("/favicon.ico")
+    def favicon_ico():
+        return FileResponse(static_dir / "favicon.ico", media_type="image/x-icon")
+
     @app.get("/api/persons")
     def persons():
         return gallery.persons()

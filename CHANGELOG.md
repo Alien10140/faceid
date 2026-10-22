@@ -5,6 +5,9 @@ update dialog; standalone users can watch GitHub releases.
 
 ## Unreleased
 
+- **The review UI has a favicon.** Lime scan-brackets around a face on the same dark
+  panel as the rest of the page, so the browser tab matches FACEID instead of a generic
+  globe. Contributed by @Alien10140.
 - **Unknown review windows the queue instead of painting every face.** With thousands of
   unknowns the tab used to `innerHTML` every cluster at once, then wait on a full-queue
   rematch after ASSIGN. It now mounts only the cluster cards in view (plus overscan),
