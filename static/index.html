@@ -146,6 +146,11 @@ td.p{color:var(--acc)} td.u{color:var(--warn)}
   .lv-ERROR,.lv-CRITICAL{color:#e05555}
   .logwrap{background:var(--panel);border:1px solid var(--line);padding:10px;
            max-height:70vh;overflow:auto}
+
+#unkQueue{height:calc(100dvh - 11.5rem);overflow:auto;margin:0 -16px;padding:0 16px 8px}
+#unkPadTop,#unkPadBot{width:100%;flex:none;pointer-events:none}
+#unkCards .cluster{overflow:visible}
+
 </style>
 </head>
 <body>
@@ -225,10 +230,14 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
   render()});
 
-async function health(){try{const h=await j('api/health');
+function updateHealthLine(h){
   if(typeof h.suggest_threshold==='number')suggestThr=h.suggest_threshold;
   const src=h.source==='folder'&&h.folder?`files ${h.folder.processed}${h.folder.scanning?' · scanning':''}`:`events ${h.open_events}`;
-  $('#health').textContent=`${h.persons} persons · queue ${h.queue} · ${src}`}catch(e){$('#health').textContent='offline'}}
+  const cue=h.guesses_refreshing?' · updating looks-like…':'';
+  $('#health').textContent=`${h.persons} persons · queue ${h.queue} · ${src}${cue}`;
+  const chip=$('#unkCue'); if(chip) chip.textContent=h.guesses_refreshing?'updating looks-like…':'';
+}
+async function health(){try{updateHealthLine(await j('api/health'))}catch(e){$('#health').textContent='offline'}}
 
 function personOptions(sel){
   const es=Object.entries(persons).sort((a,b)=>a[1].name.localeCompare(b[1].name,undefined,{sensitivity:'base'}));
@@ -288,23 +297,30 @@ async function startBackfill(){
   }catch(e){toast('Scan already running')}
   render();
 }
-async function renderUnknowns(){
-  let [clusters,bf]=await Promise.all([j('api/unknowns'),j('api/backfill')]);
-  if(tab!=='unknowns')return;
-  if(bf.running&&tab==='unknowns')setTimeout(()=>{if(tab==='unknowns')render()},4000);
-  if(!clusters.length){
-    main.innerHTML=backfillRow(bf)+'<div class="empty">No unknown faces in the queue.</div>';return}
+
+let unkRaw=null, unkBf=null, unkRows=[], unkHeights=[], unkPrefix=[];
+let unkDraft=Object.create(null), unkWinKeys='', unkPaintQueued=false;
+let unkStart=0, unkEnd=0, unkSoftTimer=0;
+function unkKeyFor(kind, items, name){
+  return kind==='sugg' ? 'sugg:'+(name||'') : 'rest:'+items.map(u=>u.id).join('.');
+}
+function estimateUnkHeight(row, width){
+  const gap=6, minTile=96, header=58, chrome=28;
+  const inner=Math.max(minTile, (width||640)-24);
+  const cols=Math.max(1, Math.floor((inner+gap)/(minTile+gap)));
+  const tileRows=Math.ceil(Math.max(1, row.items.length)/cols);
+  const tile=Math.max(minTile, (inner-(cols-1)*gap)/cols);
+  return header+chrome+tileRows*(tile+gap);
+}
+function rebuildUnkRows(){
   const excluded=window._excludedIds||(window._excludedIds=new Set());
-  // Kamera-Filter wirkt auf die Cluster: ein Cluster bleibt, wenn mindestens ein
-  // Gesicht darin von der gewaehlten Kamera stammt.
-  const unkCams=camsOf(clusters.flat(), u=>u.camera);
+  let clusters=unkRaw||[];
   if(camFilter.unknowns)
     clusters=clusters.map(c=>c.filter(u=>u.camera===camFilter.unknowns)).filter(c=>c.length);
   const n2s={}; Object.entries(persons).forEach(([sl,p])=>{n2s[p.name]=sl;});
+  window._n2s=n2s;
   const SUGGEST=suggestThr;
-  // Vorschlags-Gruppen (nach vermuteter Person) + Rest-Cluster
-  const byName={};
-  let rest=[];
+  const byName={}; let rest=[];
   clusters.forEach(c=>{
     const keep=[];
     c.forEach(it=>{
@@ -314,85 +330,307 @@ async function renderUnknowns(){
     });
     if(keep.length)rest.push(keep);
   });
-  let sugg=Object.keys(byName)
-    .map(name=>({name,slug:n2s[name],items:sortUnknownItems(byName[name])}));
+  let sugg=Object.keys(byName).map(name=>({name,slug:n2s[name],items:sortUnknownItems(byName[name])}));
   sugg.sort((a,b)=>groupSortKey(b.items)-groupSortKey(a.items)
     ||a.name.localeCompare(b.name,undefined,{sensitivity:'base'}));
   rest=rest.map(sortUnknownItems);
   rest.sort((a,b)=>groupSortKey(b)-groupSortKey(a));
-  window._sugg=sugg; window._clusters=rest; window._n2s=n2s;
-
-  const camSel=camSelect('unknowns', unkCams);
-  let html=backfillRow(bf)+`<div class="row" style="margin-bottom:6px">${unkSortSelect()}${camSel||''}</div>`
-    +`<div class="row">
-    <button class="act" title="assign every face whose best gallery match clears the recognition threshold" onclick="autoAssign()">APPLY SUGGESTIONS ≥50%</button>
-    <span class="stat">assigns every face whose best gallery match clears the recognition threshold</span>
-  </div>`;
-
-  // --- Vorschlags-Gruppen ---
-  html+=sugg.map((g,gi)=>{
-    const avg=Math.round(g.items.reduce((a,it)=>a+(it.guess_score||0),0)/g.items.length*100);
+  const rows=[];
+  sugg.forEach(g=>rows.push({key:unkKeyFor('sugg', g.items, g.name), kind:'sugg', name:g.name, slug:g.slug, items:g.items}));
+  rest.forEach((c,i)=>rows.push({key:unkKeyFor('rest', c), kind:'rest', items:c, displayN:i+1}));
+  unkRows=rows;
+  unkHeights=rows.map((row,i)=>unkHeights[i]||0);
+  unkHeights.length=rows.length;
+  window._sugg=sugg; window._clusters=rest;
+}
+function layoutUnkHeights(){
+  const q=$('#unkQueue');
+  const width=q?Math.max(160, q.clientWidth):Math.max(160, (main.clientWidth||800)-32);
+  if(unkHeights.length!==unkRows.length){
+    const next=unkRows.map((_,i)=>unkHeights[i]||0);
+    unkHeights=next;
+  }
+  for(let i=0;i<unkRows.length;i++){
+    if(!unkHeights[i]) unkHeights[i]=estimateUnkHeight(unkRows[i], width);
+  }
+  unkPrefix=new Array(unkRows.length+1);
+  unkPrefix[0]=0;
+  for(let i=0;i<unkRows.length;i++) unkPrefix[i+1]=unkPrefix[i]+unkHeights[i];
+}
+function saveUnkDraft(key){
+  const box=document.querySelector('#unkCards .cluster[data-key="'+CSS.escape(key)+'"]');
+  if(!box)return;
+  const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id).filter(Boolean);
+  const picked=(box.querySelector('select')||{}).value||'';
+  const typed=(box.querySelector('input')||{}).value||'';
+  unkDraft[key]={picked, typed, selected:sel};
+}
+function restoreUnkDrafts(){
+  document.querySelectorAll('#unkCards .cluster[data-key]').forEach(box=>{
+    const d=unkDraft[box.dataset.key]; if(!d)return;
+    const sel=box.querySelector('select'); if(sel&&d.picked) sel.value=d.picked;
+    const inp=box.querySelector('input'); if(inp&&d.typed) inp.value=d.typed;
+    if(d.selected&&d.selected.length){
+      const want=new Set(d.selected);
+      box.querySelectorAll('.tile[data-id]').forEach(t=>t.classList.toggle('sel', want.has(t.dataset.id)));
+    }
+  });
+}
+function renderUnkCard(row){
+  const n2s=window._n2s||{};
+  if(row.kind==='sugg'){
+    const avg=Math.round(row.items.reduce((a,it)=>a+(it.guess_score||0),0)/row.items.length*100);
+    const gslug=(row.items[0]&&row.items[0].guess_top_slug)||row.slug;
     return `
-    <div class="cluster sugg" data-sg="${gi}">
+    <div class="cluster sugg" data-key="${esc(row.key)}" role="article" aria-posinset="${unkRows.indexOf(row)+1}" aria-setsize="${unkRows.length}">
       <div class="head">
-        ${guessCue(g.name, null, (g.items[0]&&g.items[0].guess_top_slug)||g.slug, (g.items[0]&&g.items[0].guess_top_photo)||'', true)}
-        <span class="stat">${g.items.length} face(s) · avg ${avg}%</span>
+        ${guessCue(row.name, null, gslug, (row.items[0]&&row.items[0].guess_top_photo)||'', true)}
+        <span class="stat">${row.items.length} face(s) · avg ${avg}%</span>
         <span style="flex:1"></span>
-        <select id="ssel${gi}" title="assign to a different person instead">${personOptions(g.slug)}</select>
-        <button class="act" title="assign all faces in this group" onclick="assignSuggestion(${gi})">ASSIGN ALL</button>
-        <button class="ghost" style="color:var(--warn);border-color:var(--warn)" title="never notify, match or resurface these faces" onclick="ignoreSuggestion(${gi})">ignore</button>
+        <select title="assign to a different person instead">${personOptions(row.slug)}</select>
+        <button class="act" title="assign all faces in this group" onclick="assignSuggestion(this.closest('.cluster').dataset.key)">ASSIGN ALL</button>
+        <button class="ghost" style="color:var(--warn);border-color:var(--warn)" title="never notify, match or resurface these faces" onclick="ignoreSuggestion(this.closest('.cluster').dataset.key)">ignore</button>
       </div>
-      <div class="grid">${g.items.map(u=>`
-        <div class="tile">
-          <img src="data/unknowns/${u.id}.jpg" loading="lazy">
+      <div class="grid">${row.items.map(u=>`
+        <div class="tile" data-id="${esc(u.id)}">
+          <img src="data/unknowns/${esc(u.id)}.jpg" decoding="async" alt="">
           <span class="score">${(u.guess_score*100|0)}% · ${fmtWhen(u)}</span>
           ${u.full_url?`<button class="z" title="full snapshot" data-url="${esc(u.full_url)}" data-cap="${esc(u.camera||'')} · ${esc(fmtWhen(u))}" data-fb="data/unknowns/${esc(u.id)}.jpg" onclick="showFull(this.dataset.url,this.dataset.cap,this.dataset.fb)">⛶</button>`:''}
-          <button class="x" title="not ${esc(g.name)} — pull this face out" onclick="rejectSuggestion('${u.id}')">×</button>
+          <button class="x" title="not ${esc(row.name)} — pull this face out" onclick="rejectSuggestion('${esc(u.id)}')">×</button>
         </div>`).join('')}
       </div>
-    </div>`;}).join('');
-
-  // --- Rest-Cluster (unerkannt), Dropdown auf Guess vorgewaehlt ---
-  html+=rest.map((c,i)=>{
-    const gslug=(c[0].guess&&n2s[c[0].guess])?n2s[c[0].guess]:'';
-    return `
-    <div class="cluster" data-i="${i}">
+    </div>`;
+  }
+  const c=row.items;
+  const gslug=(c[0].guess&&n2s[c[0].guess])?n2s[c[0].guess]:'';
+  const n=String(row.displayN||1).padStart(2,'0');
+  return `
+    <div class="cluster" data-key="${esc(row.key)}" role="article">
       <div class="head">
-        <b>CLUSTER ${String(i+1).padStart(2,'0')}</b>
+        <b>CLUSTER ${n}</b>
         <span class="stat">${c.length} capture${c.length>1?'s':''} · ${esc(c[0].camera||'')}</span>
         ${c[0].guess?guessCue(c[0].guess,(c[0].guess_score*100|0),c[0].guess_top_slug||gslug,c[0].guess_top_photo||'',false):''}
         <span style="flex:1"></span>
-        <select id="sel${i}" title="assign to an existing person"><option value="">— pick person —</option>${personOptions(gslug)}</select>
-        <input id="new${i}" placeholder="…exact name, or Track as new label" size="18" title="ASSIGN: exact new name only (not with a dropdown pick). Track as new: optional role label → Label-xxxxxx (empty → Unnamed-xxxxxx)">
-        <button class="act" title="assign selected tiles (or the whole cluster) to the chosen person" onclick="assignCluster(${i})">ASSIGN</button>
-        <button class="act" title="Create a new person; optional label becomes Label-xxxxxx (empty → Unnamed-xxxxxx)" onclick="trackAsNew(${i})">Track as new</button>
-        <button class="ghost" style="color:var(--warn);border-color:var(--warn)" onclick="ignoreCluster(${i})" title="never notify, match or resurface these faces">ignore</button>
-        <button class="ghost" title="delete garbage crops permanently — does NOT stop future matching; use ignore for people" onclick="discardCluster(${i})">discard</button>
+        <select title="assign to an existing person"><option value="">— pick person —</option>${personOptions(gslug)}</select>
+        <input placeholder="…exact name, or Track as new label" size="18" title="ASSIGN: exact new name only (not with a dropdown pick). Track as new: optional label → Label-xxxxxx (empty → Unnamed-xxxxxx)">
+        <button class="act" title="assign selected tiles (or the whole cluster) to the chosen person" onclick="assignCluster(this.closest('.cluster').dataset.key)">ASSIGN</button>
+        <button class="act" title="Create a new person; optional label becomes Label-xxxxxx (empty → Unnamed-xxxxxx)" onclick="trackAsNew(this.closest('.cluster').dataset.key)">Track as new</button>
+        <button class="ghost" style="color:var(--warn);border-color:var(--warn)" onclick="ignoreCluster(this.closest('.cluster').dataset.key)" title="never notify, match or resurface these faces">ignore</button>
+        <button class="ghost" title="delete garbage crops permanently — does NOT stop future matching; use ignore for people" onclick="discardCluster(this.closest('.cluster').dataset.key)">discard</button>
       </div>
       <div class="grid">${c.map(u=>`
-        <div class="tile" data-id="${u.id}" title="click to select — actions then apply to the selection only" onclick="this.classList.toggle('sel')">
-          <img src="data/unknowns/${u.id}.jpg" loading="lazy">
+        <div class="tile" data-id="${esc(u.id)}" title="click to select — actions then apply to the selection only" onclick="this.classList.toggle('sel')">
+          <img src="data/unknowns/${esc(u.id)}.jpg" decoding="async" alt="">
           <span class="score">${u.guess_score!=null?(u.guess_score*100|0)+'% · ':''}${fmtWhen(u)}</span>
           ${u.full_url?`<button class="z" title="full snapshot" data-url="${esc(u.full_url)}" data-cap="${esc(u.camera||'')} · ${esc(fmtWhen(u))}" data-fb="data/unknowns/${esc(u.id)}.jpg" onclick="event.stopPropagation();showFull(this.dataset.url,this.dataset.cap,this.dataset.fb)">⛶</button>`:''}
         </div>`).join('')}
       </div>
-    </div>`;}).join('');
-  main.innerHTML=html;
+    </div>`;
 }
-async function assignSuggestion(gi){
-  const g=window._sugg[gi]; if(!g)return;
-  const slug=$(`#ssel${gi}`).value||g.slug;
-  const ids=g.items.map(it=>it.id).filter(id=>!window._excludedIds.has(id));
+function paintUnkWindow(force){
+  const q=$('#unkQueue'), cards=$('#unkCards'), padTop=$('#unkPadTop'), padBot=$('#unkPadBot');
+  if(!q||!cards||!padTop||!padBot)return;
+  if(!unkRows.length){ cards.innerHTML=''; padTop.style.height='0px'; padBot.style.height='0px'; return; }
+  layoutUnkHeights();
+  const top=q.scrollTop, vh=q.clientHeight||600;
+  const over=Math.max(1200, vh);
+  const a=Math.max(0, top-over), b=top+vh+over;
+  let lo=0, hi=unkRows.length;
+  while(lo<hi){ const mid=(lo+hi)>>1; if(unkPrefix[mid+1]<=a) lo=mid+1; else hi=mid; }
+  unkStart=lo;
+  lo=unkStart; hi=unkRows.length;
+  while(lo<hi){ const mid=(lo+hi)>>1; if(unkPrefix[mid]<b) lo=mid+1; else hi=mid; }
+  unkEnd=Math.max(unkStart+1, lo);
+  const keys=unkRows.slice(unkStart,unkEnd).map(r=>r.key).join('\n');
+  padTop.style.height=unkPrefix[unkStart]+'px';
+  padBot.style.height=(unkPrefix[unkRows.length]-unkPrefix[unkEnd])+'px';
+  if(!force && keys===unkWinKeys) return;
+  document.querySelectorAll('#unkCards .cluster[data-key]').forEach(el=>saveUnkDraft(el.dataset.key));
+  unkWinKeys=keys;
+  cards.innerHTML=unkRows.slice(unkStart,unkEnd).map(renderUnkCard).join('');
+  restoreUnkDrafts();
+  let deltaAbove=0, changed=false;
+  [...cards.querySelectorAll('.cluster')].forEach((el,i)=>{
+    const idx=unkStart+i;
+    const h=el.getBoundingClientRect().height;
+    if(!h)return;
+    const prev=unkHeights[idx]||h;
+    if(Math.abs(h-prev)>1){
+      if(unkPrefix[idx]<top) deltaAbove+=(h-prev);
+      unkHeights[idx]=h;
+      changed=true;
+    }
+  });
+  if(changed){
+    layoutUnkHeights();
+    if(deltaAbove) q.scrollTop=top+deltaAbove;
+    padTop.style.height=unkPrefix[unkStart]+'px';
+    padBot.style.height=(unkPrefix[unkRows.length]-unkPrefix[unkEnd])+'px';
+  }
+}
+function dropUnknownIds(ids){
+  const gone=new Set(ids||[]);
+  if(!gone.size||!unkRaw)return;
+  const q=$('#unkQueue');
+  const keepTop=q?q.scrollTop:0;
+  unkRaw=unkRaw.map(c=>c.filter(u=>!gone.has(u.id))).filter(c=>c.length);
+  rebuildUnkRows();
+  unkWinKeys='';
+  if(!unkRaw.length){
+    renderUnknowns({reuse:true});
+    return;
+  }
+  layoutUnkHeights();
+  paintUnkWindow(true);
+  if(q) q.scrollTop=keepTop;
+}
+function afterQueueMutation(ids, extra){
+  dropUnknownIds(ids);
+  health();
+  if(extra&&extra.refreshPersons) j('api/persons').then(p=>{persons=p;});
+  scheduleUnkSoftRefresh();
+}
+function scheduleUnkSoftRefresh(){
+  clearTimeout(unkSoftTimer);
+  unkSoftTimer=setTimeout(pollGuessesThenRefresh, 800);
+}
+async function pollGuessesThenRefresh(){
+  if(tab!=='unknowns')return;
+  try{
+    for(let i=0;i<16;i++){
+      const h=await j('api/health');
+      updateHealthLine(h);
+      if(!h.guesses_refreshing)break;
+      await new Promise(r=>setTimeout(r,400));
+    }
+    if(tab!=='unknowns')return;
+    const [clusters,bf]=await Promise.all([j('api/unknowns'),j('api/backfill')]);
+    unkRaw=clusters; unkBf=bf;
+    rebuildUnkRows();
+    unkWinKeys='';
+    layoutUnkHeights();
+    paintUnkWindow(true);
+  }catch(_){}
+}
+async function renderUnknowns(opts){
+  const reuse=opts&&opts.reuse&&unkRaw;
+  if(!reuse){
+    let [clusters,bf]=await Promise.all([j('api/unknowns'),j('api/backfill')]);
+    if(tab!=='unknowns')return;
+    unkRaw=clusters; unkBf=bf;
+  }
+  const bf=unkBf||{};
+  if(bf.running&&tab==='unknowns')setTimeout(()=>{if(tab==='unknowns')renderUnknowns();},4000);
+  if(!unkRaw||!unkRaw.length){
+    main.innerHTML=backfillRow(bf)+'<div class="empty">No unknown faces in the queue.</div>';return}
+  rebuildUnkRows();
+  const unkCams=camsOf((unkRaw||[]).flat(), u=>u.camera);
+  const camSel=camSelect('unknowns', unkCams);
+  main.innerHTML=backfillRow(bf)+`<div class="row" style="margin-bottom:6px">${unkSortSelect()}${camSel||''}<span class="stat" id="unkCue"></span></div>`
+    +`<div class="row">
+    <button class="act" title="assign every face whose best gallery match clears the recognition threshold" onclick="autoAssign()">APPLY SUGGESTIONS ≥50%</button>
+    <span class="stat">assigns every face whose best gallery match clears the recognition threshold</span>
+  </div>`
+    +`<div id="unkQueue"><div id="unkPadTop"></div><div id="unkCards"></div><div id="unkPadBot"></div></div>`;
+  unkHeights=[];
+  unkWinKeys='';
+  layoutUnkHeights();
+  const q=$('#unkQueue');
+  q.onscroll=()=>{ if(unkPaintQueued)return; unkPaintQueued=true; requestAnimationFrame(()=>{unkPaintQueued=false;paintUnkWindow();}); };
+  if(window._unkRO) window._unkRO.disconnect();
+  window._unkRO=new ResizeObserver(()=>{layoutUnkHeights();paintUnkWindow(true);});
+  window._unkRO.observe(q);
+  paintUnkWindow(true);
+}
+function unkRow(key){return unkRows.find(r=>r.key===key)}
+function unkSelectedIds(key, fallbackItems){
+  saveUnkDraft(key);
+  const d=unkDraft[key];
+  if(d&&d.selected&&d.selected.length) return d.selected;
+  const box=document.querySelector('#unkCards .cluster[data-key="'+CSS.escape(key)+'"]');
+  if(box){
+    const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id).filter(Boolean);
+    if(sel.length) return sel;
+  }
+  return (fallbackItems||[]).map(u=>u.id);
+}
+async function assignSuggestion(key){
+  const g=unkRow(key); if(!g)return;
+  saveUnkDraft(key);
+  const slug=(unkDraft[key]&&unkDraft[key].picked)||g.slug;
+  const ids=g.items.map(it=>it.id).filter(id=>!(window._excludedIds||new Set()).has(id));
   if(!ids.length)return toast('Nothing to assign');
   const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,person:slug})});
-  toast(`${r.assigned} face(s) assigned`);render();
+  toast(`${r.assigned} face(s) assigned`);
+  afterQueueMutation(r.ids||ids);
 }
-async function ignoreSuggestion(gi){
-  const g=window._sugg[gi]; if(!g)return;
-  const ids=g.items.map(it=>it.id).filter(id=>!window._excludedIds.has(id));
+async function ignoreSuggestion(key){
+  const g=unkRow(key); if(!g)return;
+  const ids=g.items.map(it=>it.id).filter(id=>!(window._excludedIds||new Set()).has(id));
   const r=await j('api/unknowns/ignore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,person:'-'})});
-  toast(`${r.ignored} ignored`);render();
+  toast(`${r.ignored} ignored`);
+  afterQueueMutation(ids);
 }
+async function ignoreCluster(key){
+  const row=unkRow(key); if(!row)return;
+  const ids=unkSelectedIds(key, row.items);
+  const r=await j('api/unknowns/ignore',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids,person:'-'})});
+  toast(`${r.ignored} face(s) ignored — they will not be matched or shown again`);
+  afterQueueMutation(ids);
+}
+let assignInFlight=false;
+async function assignCluster(key){
+  if(assignInFlight)return;
+  const row=unkRow(key); if(!row)return;
+  saveUnkDraft(key);
+  const d=unkDraft[key]||{};
+  const typed=(d.typed||'').trim(), picked=d.picked||'';
+  if(typed && picked)return toast('Clear the name field or the person dropdown — not both');
+  const person=typed||picked;
+  if(!person)return toast('Pick a person or enter a name');
+  const ids=unkSelectedIds(key, row.items);
+  assignInFlight=true;
+  try{
+    const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids,person})});
+    toast(`${r.assigned} face(s) → ${person}`);
+    afterQueueMutation(r.ids||ids, {refreshPersons:!!typed});
+  }finally{assignInFlight=false}
+}
+async function trackAsNew(key){
+  if(assignInFlight)return;
+  const row=unkRow(key); if(!row)return;
+  saveUnkDraft(key);
+  const d=unkDraft[key]||{};
+  if(d.picked)return toast('Clear the person dropdown before Track as new');
+  const person=mintTrackName(d.typed||'');
+  const ids=unkSelectedIds(key, row.items);
+  assignInFlight=true;
+  try{
+    const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids,person})});
+    toast(`${r.assigned} face(s) → ${person}`);
+    afterQueueMutation(r.ids||ids, {refreshPersons:true});
+  }finally{assignInFlight=false}
+}
+async function autoAssign(){
+  const r=await j('api/unknowns/auto_assign',{method:'POST'});
+  toast(r.total
+    ?`${r.total} assigned: ${Object.entries(r.assigned).map(([n,c])=>`${n} ×${c}`).join(', ')}`
+    :'No confident suggestions (≥50%) in the queue');
+  if(r.ids&&r.ids.length) afterQueueMutation(r.ids);
+  else renderUnknowns();
+}
+async function discardCluster(key){
+  const row=unkRow(key); if(!row)return;
+  const ids=unkSelectedIds(key, row.items);
+  await j('api/unknowns/discard',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids,person:'-'})});
+  toast(`${ids.length} discarded`);
+  afterQueueMutation(ids);
+}
+
 function hiliteSimilar(slug,items){
   const card=document.getElementById('p-'+slug); if(!card)return;
   const map=new Map((items||[]).map(x=>[x.file,x]));
@@ -407,7 +645,7 @@ function hiliteSimilar(slug,items){
     }else if(b){b.remove();}
   });
 }
-function rejectSuggestion(id){(window._excludedIds||(window._excludedIds=new Set())).add(id);render();}
+function rejectSuggestion(id){(window._excludedIds||(window._excludedIds=new Set())).add(id);renderUnknowns({reuse:true});}
 // Auswahl ueber ALLE Gruppen — pro Gruppe gab es das schon, bei vielen Gruppen wird
 // das Einzelklicken aber zur Fleissarbeit.
 function selectAllIgnored(on){
@@ -531,56 +769,9 @@ function mintTrackName(label){
     if(!taken.has(key(name))) return name;
   }
 }
-let assignInFlight=false;
-async function assignCluster(i){
-  if(assignInFlight)return;
-  const typed=$(`#new${i}`).value.trim(), picked=$(`#sel${i}`).value;
-  if(typed && picked)return toast('Clear the name field or the person dropdown — not both');
-  const person=typed||picked;
-  if(!person)return toast('Pick a person or enter a name');
-  const box=document.querySelector(`.cluster[data-i="${i}"]`);
-  const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
-  const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
-  assignInFlight=true;
-  try{
-    const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ids,person})});
-    toast(`${r.assigned} face(s) → ${person}`);render();
-  }finally{assignInFlight=false}
-}
-async function trackAsNew(i){
-  if(assignInFlight)return;
-  if($(`#sel${i}`).value)return toast('Clear the person dropdown before Track as new');
-  const person=mintTrackName($(`#new${i}`).value);
-  const box=document.querySelector(`.cluster[data-i="${i}"]`);
-  const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
-  const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
-  assignInFlight=true;
-  try{
-    const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ids,person})});
-    toast(`${r.assigned} face(s) → ${person}`);render();
-  }finally{assignInFlight=false}
-}
 function showFull(url,cap,fallback){const im=$('#lbimg');
   im.onerror=fallback?()=>{im.onerror=null;im.src=fallback;$('#lbcap').textContent=(cap||'')+' · full snapshot expired, showing face crop'}:null;
   im.src=url;$('#lbcap').textContent=cap||'';$('#lightbox').style.display='flex'}
-async function autoAssign(){
-  const r=await j('api/unknowns/auto_assign',{method:'POST'});
-  toast(r.total
-    ?`${r.total} assigned: ${Object.entries(r.assigned).map(([n,c])=>`${n} ×${c}`).join(', ')}`
-    :'No confident suggestions (≥50%) in the queue');
-  render();
-}
-async function discardCluster(i){
-  const box=document.querySelector(`.cluster[data-i="${i}"]`);
-  const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
-  const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
-  await j('api/unknowns/discard',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ids,person:'-'})});
-  toast(`${ids.length} discarded`);render();
-}
-
 let logTimer=null, logLevel=null;
 // Kamera-Auswahl fuer die Listen. Erscheint erst ab zwei Kameras — bei einer waere
 // ein Filter nur ein Bedienelement ohne Wirkung. Idee aus einem Nutzerbeitrag (#14).
@@ -603,7 +794,7 @@ function groupSortKey(items){
 }
 function unkSortSelect(){
   return `<span class="stat">sort:</span>
-    <select onchange="unkSort=this.value;localStorage.setItem('faceid.unkSort',unkSort);render()" style="margin-right:12px" title="order suggestion groups and clusters">
+    <select onchange="unkSort=this.value;localStorage.setItem('faceid.unkSort',unkSort);renderUnknowns({reuse:true})" style="margin-right:12px" title="order suggestion groups and clusters">
       <option value="date"${unkSort==='date'?' selected':''}>newest</option>
       <option value="match"${unkSort==='match'?' selected':''}>match %</option>
     </select>`;
@@ -611,8 +802,9 @@ function unkSortSelect(){
 function camSelect(view, cams){
   if(cams.length < 2) return '';
   const cur = camFilter[view];
+  const go = view==='unknowns' ? 'renderUnknowns({reuse:true})' : 'render()';
   return `<span class="stat">camera:</span>
-    <select onchange="camFilter['${view}']=this.value;render()" style="margin-right:12px">
+    <select onchange="camFilter['${view}']=this.value;${go}" style="margin-right:12px">
       <option value=""${cur===''?' selected':''}>all (${cams.length})</option>
       ${cams.map(c=>`<option value="${esc(c)}"${cur===c?' selected':''}>${esc(c)}</option>`).join('')}
     </select>`;

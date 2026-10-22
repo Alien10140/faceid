@@ -69,7 +69,9 @@ opened read-only and never changed.
 
 **Unknown review** — new faces arrive auto-clustered; assign a whole cluster with one
 click, or scan your camera history to bootstrap the gallery. A *looks like* guess shows
-that person's gallery reference photo beside the name (hover to enlarge):
+that person's gallery reference photo beside the name (hover to enlarge). The queue
+windows cluster cards as you scroll, so thousands of faces do not freeze the tab, and
+ASSIGN does not wait on rematching the rest of the queue:
 
 ![Unknown review with auto-clustered faces](docs/screenshot-unknowns.png)
 
