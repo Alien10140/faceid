@@ -1171,9 +1171,17 @@ class Gallery:
             t = threading.Thread(target=self._refresh_guesses_worker, name="refresh-guesses",
                                  daemon=True)
             self._refresh_thread = t
-            t.start()
+            try:
+                t.start()
+            except Exception:
+                self._refresh_thread = None
+                self._refresh_deadline = None
+                self._refresh_first_request = None
+                self._guesses_refreshing = False
+                log.exception("failed to start refresh-guesses worker")
 
     def _refresh_guesses_worker(self):
+        crashed = False
         try:
             while True:
                 with self._refresh_sched_lock:
@@ -1199,18 +1207,32 @@ class Gallery:
                     if self._refresh_deadline is None:
                         return
         except Exception:
+            crashed = True
             log.exception("refresh-guesses worker crashed")
         finally:
             with self._refresh_sched_lock:
-                if self._refresh_thread is threading.current_thread():
+                if self._refresh_thread is not threading.current_thread():
+                    return
+                self._refresh_thread = None
+                if crashed:
+                    self._refresh_deadline = None
+                    self._refresh_first_request = None
+                    self._guesses_refreshing = False
+                    return
+                if self._refresh_deadline is None:
+                    self._guesses_refreshing = False
+                    return
+                t = threading.Thread(target=self._refresh_guesses_worker,
+                                     name="refresh-guesses", daemon=True)
+                self._refresh_thread = t
+                try:
+                    t.start()
+                except Exception:
                     self._refresh_thread = None
-                    if self._refresh_deadline is None:
-                        self._guesses_refreshing = False
-                    else:
-                        t = threading.Thread(target=self._refresh_guesses_worker,
-                                             name="refresh-guesses", daemon=True)
-                        self._refresh_thread = t
-                        t.start()
+                    self._refresh_deadline = None
+                    self._refresh_first_request = None
+                    self._guesses_refreshing = False
+                    log.exception("failed to restart refresh-guesses worker")
 
     @property
     def guesses_epoch(self) -> int:

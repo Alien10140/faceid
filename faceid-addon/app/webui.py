@@ -64,6 +64,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     app.mount("/data", StaticFiles(directory=data_dir), name="data")
 
     sub_label_q: queue.Queue = queue.Queue()
+    sub_label_failures = {"n": 0}
 
     def _enqueue_sub_label(event_id, name, score):
         if not event_id:
@@ -80,6 +81,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
                 eid, name, score = item
                 processor.frigate.set_sub_label(eid, name, score)
             except Exception:
+                sub_label_failures["n"] += 1
                 log.exception("background sub_label failed")
 
     threading.Thread(target=_sub_label_loop, daemon=True, name="faceid-sub-label").start()
@@ -850,6 +852,7 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
                 "folder": folder.status() if folder and folder.enabled else None,
                 "suggest_threshold": float(cfg["faceid"].get("suggest_threshold", 0.40)),
                 **_guess_flags(),
-                "guesses_updated_ts": gallery.guesses_updated_ts}
+                "guesses_updated_ts": gallery.guesses_updated_ts,
+                "sub_label_failures": sub_label_failures["n"]}
 
     return app

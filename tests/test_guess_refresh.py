@@ -176,6 +176,8 @@ class AssignDoesNotBlockRefreshTests(unittest.TestCase):
         self.assertIn("guesses_refreshing", h)
         self.assertIsInstance(h["guesses_epoch"], int)
         self.assertIsInstance(h["guesses_refreshing"], bool)
+        self.assertIn("sub_label_failures", h)
+        self.assertEqual(h["sub_label_failures"], 0)
 
 
 class SubLabelOffHandlerClockTests(unittest.TestCase):
@@ -260,6 +262,28 @@ class ReviewFollowUpTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as cm:
                 _route(app, path)()
             self.assertEqual(cm.exception.status_code, 404)
+
+    def test_failed_sub_label_increments_health_counter(self):
+        def boom(event_id, label, score):
+            raise RuntimeError("frigate down")
+        app, gallery, _proc = _app(Path(self.tmp.name) / "failfrigate",
+                                   frigate=SimpleNamespace(enabled=True, set_sub_label=boom))
+        assign = _route(app, "/api/unknowns/assign")
+        health = _route(app, "/api/health")
+        slug = gallery.create_person("Juli")
+        crop = np.full((80, 80, 3), 127, dtype=np.uint8)
+        uid = gallery.save_unknown(
+            crop, _emb(), {"camera": "entrance", "event_id": "evt-fail"})
+        r = assign(AssignBody(ids=[uid], person=slug))
+        self.assertEqual(r["assigned"], 1)
+        deadline = time.time() + 2.0
+        n = 0
+        while time.time() < deadline:
+            n = health()["sub_label_failures"]
+            if n:
+                break
+            time.sleep(0.03)
+        self.assertGreaterEqual(n, 1)
 
     def test_assign_does_not_enqueue_when_frigate_is_none(self):
         app, gallery, _proc = _app(Path(self.tmp.name) / "nonefrigate", frigate=None)
