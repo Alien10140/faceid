@@ -107,6 +107,16 @@ class SkipUnchangedRefreshTests(unittest.TestCase):
                      if p.suffix == ".tmp" or p.name.startswith(".")]
         self.assertEqual(leftovers, [])
 
+    def test_noop_pass_stamps_ts_without_bumping_epoch(self):
+        self._unknown("u1")
+        self.gal.refresh_guesses()
+        epoch = self.gal.guesses_epoch
+        self.assertGreater(epoch, 0)
+        self.gal._guesses_updated_ts = 0.0
+        self.gal.refresh_guesses()
+        self.assertEqual(self.gal.guesses_epoch, epoch)
+        self.assertGreater(self.gal.guesses_updated_ts, 0.0)
+
 
 class AssignDoesNotBlockRefreshTests(unittest.TestCase):
     def setUp(self):
@@ -239,7 +249,8 @@ class ReviewFollowUpTests(unittest.TestCase):
         self.gallery.request_refresh_guesses(delay=0.01, max_delay=0.01)
         self._wait_idle()
         self.assertGreater(self.gallery.guesses_updated_ts, 0.0)
-        self.assertGreater(self.gallery.guesses_epoch, before)
+        # Empty queue: pass completed, but no cue files changed.
+        self.assertEqual(self.gallery.guesses_epoch, before)
 
     def test_unassign_and_ignore_person_return_guess_flags(self):
         slug = self.gallery.create_person("Juli")

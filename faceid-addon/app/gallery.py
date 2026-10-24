@@ -1132,7 +1132,8 @@ class Gallery:
         if changed:
             self._fsync_unknown_dir()
         with self._refresh_sched_lock:
-            self._guesses_epoch += 1
+            if changed:
+                self._guesses_epoch += 1
             self._guesses_updated_ts = time.time()
 
     def _fsync_unknown_dir(self):
