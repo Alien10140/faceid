@@ -3,6 +3,15 @@
 All notable changes to FaceID. The Home Assistant app shows this file in the
 update dialog; standalone users can watch GitHub releases.
 
+## 0.27.1 — 2026-10-27
+
+- **People grid:** the key number (1–9) sits on the photo again instead of as loose text under
+  the card.
+- **Links in text** (*How trimming works ↗*, *How it works ↗*) use the FaceID green instead of
+  the browser's default blue, underlined, at 5.2:1 (light) and 10.1:1 (dark).
+- **Phone header:** below 440 px the wordmark and the light/dark switch give way (the theme
+  follows the system there), so the header keeps its icons on one row.
+
 ## 0.27.0 — 2026-10-27
 
 - **A new review interface.** Sorting is now a table: every waiting face at once, grouped
