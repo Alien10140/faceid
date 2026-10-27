@@ -436,6 +436,9 @@ dialog::backdrop{background:oklch(12% .01 50 / .72)}
 .ph2 .why{position:absolute;left:6px;right:6px;top:6px;font:600 12px var(--sans);padding:4px 7px;border-radius:8px;background:oklch(12% .01 50 / .78);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ph2 .why.warn{background:var(--warn);color:oklch(15% .02 50)}
 .ph2 .ops .del{color:oklch(45% .17 25)}
+.fullt{color:var(--hot-text);font-weight:700}
+.fullnote{display:flex;gap:10px;align-items:flex-start;margin:0 0 12px;padding:10px 14px;border-radius:14px;background:var(--hot-soft);font-size:15px;max-width:90ch}
+.fullnote svg{flex:0 0 auto;margin-top:2px;color:var(--hot-text)}
 /* ignored */
 .igrp{background:var(--raise);border-radius:24px;padding:14px;box-shadow:var(--shadow);margin-bottom:12px}
 .igrp header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
@@ -603,7 +606,7 @@ const img=(src,fallback)=>`<span class="face"><img src="${esc(src)}" alt="" load
 
 /* ================= state ================= */
 let view=store.get('faceid.view','sort');if(view==='tools')view='checks';if(!['sort','people','add','history','settings','log','checks'].includes(view))view='sort';
-let persons={},clusters=[],health=null,SUG=.4,lastSeen={},ignoredGroups=null;
+let persons={},clusters=[],health=null,SUG=.4,lastSeen={},ignoredGroups=null,maxFaces=0;
 let sel=new Set(),lastClick=null,camF='all',openCards=new Set(),newOpen=false,landed=null,recent={},undoStack=[],busy=false;
 let openRow=null,showAll=false,peopleView=store.get('faceid-b-people','list'),peopleTab='people';
 
@@ -620,14 +623,17 @@ function peopleList(){ /* favourites, then recently seen, then most photos */
   return Object.keys(persons).sort((a,b)=>(persons[b].favorite-persons[a].favorite)||((lastSeen[pname(b)]?.ts||0)-(lastSeen[pname(a)]?.ts||0))||(persons[b].count-persons[a].count)||pname(a).localeCompare(pname(b)));
 }
 const piles=()=>peopleList().slice(0,9);
+const full=s=>maxFaces&&persons[s]&&persons[s].count>=maxFaces;
+const FULL_WHY=()=>`Limit of ${maxFaces} reached. New faces still count: each one replaces the photo most like the others, so different angles and light stay. Replaced photos are under “Set aside”.`;
+const countText=s=>{const n=persons[s].count;return `${n} photo${n===1?'':'s'}${full(s)?' · <span class="fullt">full</span>':n<10?' · <span class="warn-t">few</span>':''}`};
 const allFaces=()=>clusters.flat();
 const faceById=id=>allFaces().find(u=>u.id===id);
 const slugOfGuess=u=>u.guess_top_slug&&persons[u.guess_top_slug]?u.guess_top_slug:Object.keys(persons).find(s=>persons[s].name===u.guess)||null;
 
 /* ================= loading ================= */
 async function loadAll(){
-  const [p,u,h,hist]=await Promise.all([api('api/persons'),api('api/unknowns'),api('api/health').catch(()=>null),api('api/history?limit=300').catch(()=>({items:[]}))]);
-  persons=p;clusters=u;setHealth(h);
+  const [p,u,h,hist,st]=await Promise.all([api('api/persons'),api('api/unknowns'),api('api/health').catch(()=>null),api('api/history?limit=300').catch(()=>({items:[]})),maxFaces?null:api('api/settings').catch(()=>null)]);
+  persons=p;clusters=u;setHealth(h);if(st)maxFaces=st.max_faces_per_person||0;
   lastSeen={};for(const it of hist.items||[]){if(it.person&&it.person!=='unknown'&&(!lastSeen[it.person]||it.ts>lastSeen[it.person].ts))lastSeen[it.person]={ts:it.ts,cam:it.camera}}
   const ids=new Set(allFaces().map(u=>u.id));sel.forEach(id=>{if(!ids.has(id))sel.delete(id)});
 }
@@ -731,8 +737,8 @@ function pileHtml(s,i){
   const files=order(s),rec=recent[s]||[];
   const fan=[0,1,2].map(k=>{const r=rec[2-k],f=files[k]||files[0];const src=r||(f?personImg(s,f):null);return `<span class="${landed===s&&k===2?'land':''}">${src?img(src):avatar(s)}</span>`}).join('');
   const p=persons[s];
-  return `<button class="pile ${sel.size?'armed':''}" data-pile="${esc(s)}" aria-label="Move to ${esc(p.name)}, key ${i+1}">
-    <span class="fan">${fan}</span><span><span class="nm">${esc(p.name)}</span><span class="mt">${p.count} photo${p.count===1?'':'s'}${p.count<10?' · <span class="warn-t">few</span>':''}</span></span><span class="key">${i+1}</span></button>`;
+  return `<button class="pile ${sel.size?'armed':''}" data-pile="${esc(s)}" aria-label="Move to ${esc(p.name)}, key ${i+1}"${full(s)?` data-tip="${maxFaces} photos — the limit" data-tipsub="new faces replace the most similar photo, so angles stay varied"`:''}>
+    <span class="fan">${fan}</span><span><span class="nm">${esc(p.name)}</span><span class="mt">${countText(s)}</span></span><span class="key">${i+1}</span></button>`;
 }
 let railIO;
 function watchRail(){railIO?.disconnect();const p=document.querySelector('.rail .pile');if(!p||!('IntersectionObserver' in window))return;
@@ -758,7 +764,7 @@ function mintName(label){ /* "Unnamed-3fa2c1" — unique against existing names 
 }
 async function assign(person,ids=sel){
   ids=[...ids];if(!ids.length)return toast('Select faces first — tap them',false);if(busy)return;busy=true;
-  const existed=person in persons,before=new Set(existed?persons[person].files:[]);
+  const existed=person in persons,before=new Set(existed?persons[person].files:[]),beforeTrim=new Set(existed?(persons[person].trimmed||[]).map(t=>t.file):[]);
   document.querySelectorAll('.f').forEach(f=>{if(ids.includes(f.dataset.f))f.classList.add('gone')});
   try{
     const r=await api('api/unknowns/assign',{json:{ids,person}});
@@ -766,7 +772,8 @@ async function assign(person,ids=sel){
     recent[slug]=[...added.map(f=>personImg(slug,f)).reverse(),...(recent[slug]||[])].slice(0,3);landed=slug;render();landed=null;
     pushUndo(async()=>{for(const f of added)await api(`api/persons/${enc(slug)}/faces/${enc(f)}/unassign`,{method:'POST'});
       if(!existed)await api(`api/persons/${enc(slug)}`,{method:'DELETE'}).catch(()=>{});recent[slug]=(recent[slug]||[]).slice(added.length)});
-    toast(`${r.assigned} face${r.assigned>1?'s':''} → ${pname(slug)}`);
+    const swapped=existed&&full(slug)?(persons[slug].trimmed||[]).filter(t=>t.kind==='limit'&&!beforeTrim.has(t.file)).length:0;
+    toast(`${r.assigned} face${r.assigned>1?'s':''} → ${pname(slug)}`+(swapped?` · still ${persons[slug].count}: ${swapped} similar photo${swapped>1?'s':''} set aside to keep angles varied`:''));
   }catch(e){toast(e.message,false);await loadAll();render()}finally{busy=false}
 }
 async function ignoreSel(ids=sel){
@@ -836,7 +843,7 @@ async function renderPeople(){
   if(peopleView==='grid'){
     main.innerHTML=head+`<div class="pgrid">${list.map(s=>{const p=persons[s],i=peopleList().indexOf(s),open=openRow===s;return `<div class="pc ${open?'open':''}">
       <button class="pcard" data-row="${esc(s)}" aria-expanded="${open}" aria-label="${esc(p.name)}, ${p.count} photos"><span class="cover">${avatar(s)}</span>
-        <span class="nm">${esc(p.name)}</span><span class="mt">${p.count} photo${p.count===1?'':'s'}${lastSeen[p.name]?' · '+esc(when(lastSeen[p.name].ts)):''}</span>
+        <span class="nm">${esc(p.name)}</span><span class="mt">${countText(s)}${lastSeen[p.name]?' · '+esc(when(lastSeen[p.name].ts)):''}</span>
         ${p.count<10?'<span class="mt warn-t" style="margin-top:6px">Few photos, matches are shakier</span>':''}</button>
       ${i<9?`<span class="num" aria-hidden="true">${i+1}</span>`:''}
       <button class="fav" data-fav="${esc(s)}" aria-pressed="${p.favorite}" aria-label="${p.favorite?'Remove from':'Add to'} favourites" data-tip="${p.favorite?'Favourite':'Mark as favourite'}" data-tipsub="favourites come first">${p.favorite?'★':'☆'}</button></div>
@@ -847,7 +854,7 @@ async function renderPeople(){
   main.innerHTML=head+`<div class="rows">${list.map(s=>{const p=persons[s],i=peopleList().indexOf(s),open=openRow===s,o=order(s),strip=o.slice(1,9),rest=o.length-1-strip.length;
     return `<div class="row ${open?'open':''}">
     <button class="rh" data-row="${esc(s)}" aria-expanded="${open}"><span class="av">${avatar(s)}</span><span class="key">${i<9?i+1:''}</span>
-      <span><span class="nm" style="display:block">${esc(p.name)}${p.favorite?' <span style="color:var(--hot-text)">★</span>':''}</span><span class="mt">${p.count} photo${p.count===1?'':'s'}${lastSeen[p.name]?' · last seen '+esc(when(lastSeen[p.name].ts)):''}</span>${p.count<10?'<br><span class="mt warn-t">Few photos, matches are shakier</span>':''}</span>
+      <span><span class="nm" style="display:block">${esc(p.name)}${p.favorite?' <span style="color:var(--hot-text)">★</span>':''}</span><span class="mt">${countText(s)}${lastSeen[p.name]?' · last seen '+esc(when(lastSeen[p.name].ts)):''}</span>${p.count<10?'<br><span class="mt warn-t">Few photos, matches are shakier</span>':''}</span>
       <span class="strip">${strip.map(f=>`<span>${img(personImg(s,f))}</span>`).join('')}${rest>0?`<span class="plus">+${rest}</span>`:''}</span>
       <span class="ex" aria-hidden="true">›</span></button>
     ${open?detailHtml(s):''}</div>`}).join('')}</div>`;
@@ -857,6 +864,7 @@ function detailHtml(s){
   return `<div class="rb">${window._renaming===s?`<form class="inline-name" id="renForm"><label class="vh" for="renIn">New name</label><input id="renIn" value="${esc(p.name)}"><button class="b hot">Save</button><button class="b" type="button" id="renNo">Cancel</button></form>`:''}
     <div class="acts"><button class="b hot" data-view="add" data-for="${esc(s)}">Add photos</button><button class="b" data-ren="${esc(s)}">Rename</button>
       <button class="b" data-fav="${esc(s)}" aria-pressed="${p.favorite}">${p.favorite?'★ Favourite':'☆ Favourite'}</button><button class="b" data-ign="${esc(s)}">Ignore person</button><button class="b ghost" data-del="${esc(s)}" style="color:var(--warn)">Delete…</button></div>
+    ${full(s)?`<p class="fullnote">${ICON.keyimg.replace('width="22" height="22"','width="18" height="18"')}${FULL_WHY()}</p>`:''}
     ${o.length?`<div class="grid">${grid.map(f=>`<div class="ph2 ${f===key?'key':''}">${img(personImg(s,f))}${f===key?`<span class="kb">${ICON.keyimg}Key image</span>`:''}
       <span class="tr"><button class="del" data-delface="${esc(s)}|${esc(f)}" aria-label="Delete this photo" data-tip="Delete photo" data-tipsub="removed from ${esc(p.name)}'s references">${ICON.trash}</button></span>
       <span class="ops">${f===key?'':`<button class="ic" data-key="${esc(s)}|${esc(f)}" aria-label="Make this the key image of ${esc(p.name)}" data-tip="Make key image" data-tipsub="shown as ${esc(p.name)}'s picture everywhere">${ICON.keyimg}</button>`}<button class="ic" data-back="${esc(s)}|${esc(f)}" aria-label="Not ${esc(p.name)}, back to sorting" data-tip="Not ${esc(p.name)}" data-tipsub="moves the photo back to sorting">${ICON.back}</button></span></div>`).join('')}</div>
