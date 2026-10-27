@@ -207,7 +207,7 @@ main{max-width:1500px;margin:0 auto;padding:22px 24px 120px}
 .allp{justify-content:flex-start}
 /* tooltip for avatars (hover with a mouse, or keyboard focus) */
 .tip{position:fixed;z-index:100;pointer-events:none;background:var(--ink);color:var(--ground);border-radius:10px;padding:7px 11px;font:600 14px/1.25 var(--sans);
-  box-shadow:0 8px 24px oklch(0% 0 0 / .3);white-space:nowrap;opacity:0;transform:translateY(-3px);transition:opacity .12s,transform .12s;max-width:min(320px,calc(100vw - 16px));overflow:hidden;text-overflow:ellipsis}
+  box-shadow:0 8px 24px oklch(0% 0 0 / .3);white-space:normal;width:max-content;opacity:0;transform:translateY(-3px);transition:opacity .12s,transform .12s;max-width:min(300px,calc(100vw - 16px));overflow-wrap:break-word}
 .tip.on{opacity:1;transform:none}
 .tip small{display:block;font-weight:400;font-size:13px;opacity:.82}
 .tip::before{content:"";position:absolute;left:var(--ax,50%);top:-5px;width:10px;height:10px;background:inherit;transform:translateX(-50%) rotate(45deg);border-radius:2px}
@@ -762,18 +762,37 @@ function mintName(label){ /* "Unnamed-3fa2c1" — unique against existing names 
   for(let n=0;n<64;n++){const b=crypto.getRandomValues(new Uint8Array(3)),name=`${base}-${[...b].map(x=>x.toString(16).padStart(2,'0')).join('')}`;if(!taken.has(name.toLowerCase()))return name}
   return `${base}-${Date.now().toString(16)}`;
 }
+function snapPerson(slug){const p=persons[slug];return {existed:!!p,files:new Set(p?p.files:[]),trim:new Set(p?(p.trimmed||[]).map(t=>t.file):[])}}
+/* Before-state of everyone: the server may resolve a typed name to an existing person, so the
+   slug is only known after the call. Undo must never treat an existing person as new. */
+const snapAll=()=>Object.fromEntries(Object.keys(persons).map(s=>[s,snapPerson(s)]));
+const EMPTY={existed:false,files:new Set(),trim:new Set()};
+/* After an assignment: new active photos, and photos set aside by it. At the photo limit a new face can be
+   set aside straight away, or push an older one out — undo has to reverse both, not just the active ones. */
+function diffPerson(slug,b){
+  const p=persons[slug]||{files:[],trimmed:[]},added=p.files.filter(f=>!b.files.has(f)),newTrim=(p.trimmed||[]).filter(t=>!b.trim.has(t.file));
+  const pushedOut=newTrim.filter(t=>b.files.has(t.file)).map(t=>t.file),parked=newTrim.filter(t=>!b.files.has(t.file)).map(t=>t.file);
+  const shown=[...added.map(f=>personImg(slug,f)),...parked.map(f=>`data/persons/${enc(slug)}/_trimmed/${enc(f)}`)];
+  const undo=async()=>{
+    for(const f of added)await api(`api/persons/${enc(slug)}/faces/${enc(f)}/unassign`,{method:'POST'});
+    for(const f of parked)await api(`api/persons/${enc(slug)}/trimmed/${enc(f)}/unassign`,{method:'POST'});
+    for(const f of pushedOut)await api(`api/persons/${enc(slug)}/trimmed/${enc(f)}/restore`,{method:'POST'});
+    if(!b.existed)await api(`api/persons/${enc(slug)}`,{method:'DELETE'}).catch(()=>{});
+    recent[slug]=(recent[slug]||[]).filter(x=>!shown.includes(x));
+  };
+  return {added,pushedOut,parked,shown,undo};
+}
 async function assign(person,ids=sel){
   ids=[...ids];if(!ids.length)return toast('Select faces first — tap them',false);if(busy)return;busy=true;
-  const existed=person in persons,before=new Set(existed?persons[person].files:[]),beforeTrim=new Set(existed?(persons[person].trimmed||[]).map(t=>t.file):[]);
+  const before=snapAll();
   document.querySelectorAll('.f').forEach(f=>{if(ids.includes(f.dataset.f))f.classList.add('gone')});
   try{
     const r=await api('api/unknowns/assign',{json:{ids,person}});
-    sel.clear();await loadAll();const slug=r.slug,added=(persons[slug]?.files||[]).filter(f=>!before.has(f));
-    recent[slug]=[...added.map(f=>personImg(slug,f)).reverse(),...(recent[slug]||[])].slice(0,3);landed=slug;render();landed=null;
-    pushUndo(async()=>{for(const f of added)await api(`api/persons/${enc(slug)}/faces/${enc(f)}/unassign`,{method:'POST'});
-      if(!existed)await api(`api/persons/${enc(slug)}`,{method:'DELETE'}).catch(()=>{});recent[slug]=(recent[slug]||[]).slice(added.length)});
-    const swapped=existed&&full(slug)?(persons[slug].trimmed||[]).filter(t=>t.kind==='limit'&&!beforeTrim.has(t.file)).length:0;
-    toast(`${r.assigned} face${r.assigned>1?'s':''} → ${pname(slug)}`+(swapped?` · still ${persons[slug].count}: ${swapped} similar photo${swapped>1?'s':''} set aside to keep angles varied`:''));
+    sel.clear();await loadAll();const slug=r.slug,d=diffPerson(slug,before[slug]||EMPTY);
+    recent[slug]=[...d.shown.reverse(),...(recent[slug]||[])].slice(0,3);landed=slug;render();landed=null;
+    pushUndo(d.undo);
+    const swapped=d.pushedOut.length+d.parked.length;
+    toast(`${r.assigned} face${r.assigned>1?'s':''} → ${pname(slug)}`+(swapped&&full(slug)?` · still ${persons[slug].count}: ${swapped} similar photo${swapped>1?'s':''} set aside to keep angles varied`:swapped?` · ${swapped} set aside`:''));
   }catch(e){toast(e.message,false);await loadAll();render()}finally{busy=false}
 }
 async function ignoreSel(ids=sel){
@@ -794,10 +813,10 @@ function discardSel(ids=sel){
 }
 async function applyCards(list){
   if(busy)return;busy=true;let n=0;const undos=[];
-  try{for(const c of list){const before=new Set(persons[c.guess].files);const r=await api('api/unknowns/assign',{json:{ids:c.faces.map(u=>u.id),person:c.guess}});n+=r.assigned;
-      persons=await api('api/persons');const added=persons[c.guess].files.filter(f=>!before.has(f));undos.push([c.guess,added]);
-      recent[c.guess]=[...added.map(f=>personImg(c.guess,f)).reverse(),...(recent[c.guess]||[])].slice(0,3)}
-    pushUndo(async()=>{for(const [s,files] of undos)for(const f of files)await api(`api/persons/${enc(s)}/faces/${enc(f)}/unassign`,{method:'POST'})});
+  try{for(const c of list){const b=snapPerson(c.guess);const r=await api('api/unknowns/assign',{json:{ids:c.faces.map(u=>u.id),person:c.guess}});n+=r.assigned;
+      persons=await api('api/persons');const d=diffPerson(c.guess,b);undos.push(d.undo);
+      recent[c.guess]=[...d.shown.reverse(),...(recent[c.guess]||[])].slice(0,3)}
+    pushUndo(async()=>{for(const u of undos.reverse())await u()});
     sel.clear();await loadAll();render();toast(`${n} faces sorted into ${list.length} pile${list.length>1?'s':''}`);
   }catch(e){toast(e.message,false);await loadAll();render()}finally{busy=false}
 }

@@ -23,6 +23,12 @@ update dialog; standalone users can watch GitHub releases.
   `null`) picks the photo that represents a person everywhere in the interface; it is
   stored in `meta.json` and travels with backups. Matching is unaffected. If that photo is
   set aside or deleted, the newest photo takes its place.
+- **Undo also works for people at the photo limit.** There a new face can be set aside at
+  once, or push an older photo out. Undo now sends set-aside new faces straight back to
+  sorting (`POST /api/persons/{slug}/trimmed/{file}/unassign`) and restores the photos they
+  pushed out, instead of only removing the faces that stayed.
+- **Photos sent back to sorting keep their camera and time.** Unassigning used to blank both;
+  set-aside photos now remember where they came from, and restoring one puts that back too.
 - **Light and dark**, following the system, switchable in the header. Colours follow the
   FaceID logo; fonts (Unbounded, Albert Sans — SIL OFL) ship in `static/assets`, so the
   interface loads nothing from outside.

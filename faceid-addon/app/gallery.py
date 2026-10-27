@@ -173,6 +173,8 @@ class Gallery:
 
     def _trim_face(self, slug: str, fname: str, emb, mean_sim: float, reason: str = "over the per-person photo limit — most similar to your other photos", partner: str = ""):
         td = self._trimmed_dir(slug)
+        entry = self._cache.get(slug) or {}
+        source = (entry.get("sources") or {}).get(fname)
         src = self.persons_dir / slug / fname
         if src.exists():
             src.rename(td / fname)
@@ -183,6 +185,7 @@ class Gallery:
             log = []
         log.insert(0, {"file": fname, "ts": time.time(), "mean_sim": round(mean_sim, 3),
                        "reason": reason, "partner": partner,
+                       **({"source": source} if source else {}),
                        "embedding": [round(float(v), 6) for v in emb]})
         # Getrimmt-Ordner begrenzen: nur die neuesten trimmed_keep aufheben, Rest löschen
         keep = self.trimmed_keep if self.trimmed_keep and self.trimmed_keep > 0 else len(log)
@@ -252,9 +255,38 @@ class Gallery:
             (td / fname).rename(self.persons_dir / slug / fname)
             entry["emb"] = np.vstack([entry["emb"], np.array(rec["embedding"], dtype=np.float32)[None, :]])
             entry["files"].append(fname)
+            if rec.get("source"):
+                entry.setdefault("sources", {})[fname] = rec["source"]
             log = [e for e in log if e["file"] != fname]
             log_f.write_text(json.dumps(log, ensure_ascii=False))
             self._persist(slug)
+            return True
+
+    def unassign_trimmed(self, slug: str, fname: str) -> bool:
+        """Ein beiseitegelegtes Foto direkt zurueck ins Sortieren schicken, ohne Umweg ueber
+        die aktive Galerie. Noetig fuer das Rueckgaengigmachen einer Zuordnung bei voller
+        Person: dort kann das neue Gesicht selbst sofort beiseitegelegt worden sein, und
+        ein Restore wuerde erst die Galerie ueber das Limit heben."""
+        with self._lock:
+            entry = self._cache.get(slug)
+            td = self.persons_dir / slug / "_trimmed"
+            log_f = td / "log.json"
+            if entry is None or not log_f.exists():
+                return False
+            log = json.loads(log_f.read_text())
+            rec = next((e for e in log if e["file"] == fname), None)
+            if rec is None or not (td / fname).exists():
+                return False
+            src = rec.get("source") or {}
+            uid = f"u{int(time.time() * 1000)}"
+            while (self.unknown_dir / f"{uid}.json").exists():
+                uid += "x"
+            (td / fname).rename(self.unknown_dir / f"{uid}.jpg")
+            (self.unknown_dir / f"{uid}.json").write_text(json.dumps(
+                {"camera": src.get("camera") or "", "event_id": "", "removed_from": entry["name"],
+                 "ts": time.time(), **({"event_ts": src["event_ts"]} if src.get("event_ts") else {}),
+                 "embedding": rec["embedding"]}, ensure_ascii=False))
+            log_f.write_text(json.dumps([e for e in log if e["file"] != fname], ensure_ascii=False))
             return True
 
     def delete_trimmed(self, slug: str, fname: str):
@@ -748,10 +780,14 @@ class Gallery:
                 return False
             idx = entry["files"].index(fname)
             emb = entry["emb"][idx]
+            src = (entry.get("sources") or {}).pop(fname, None) or {}
             uid = f"u{int(time.time() * 1000)}"
+            while (self.unknown_dir / f"{uid}.json").exists():
+                uid += "x"
             (self.persons_dir / slug / fname).rename(self.unknown_dir / f"{uid}.jpg")
             (self.unknown_dir / f"{uid}.json").write_text(json.dumps(
-                {"camera": "", "event_id": "", "removed_from": entry["name"], "ts": time.time(),
+                {"camera": src.get("camera") or "", "event_id": "", "removed_from": entry["name"],
+                 "ts": time.time(), **({"event_ts": src["event_ts"]} if src.get("event_ts") else {}),
                  "embedding": [round(float(v), 6) for v in emb]}, ensure_ascii=False))
             entry["files"].pop(idx)
             entry["emb"] = np.delete(entry["emb"], idx, axis=0)

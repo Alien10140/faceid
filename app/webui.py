@@ -194,6 +194,14 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
             gallery.request_refresh_guesses()
         return {"ok": ok}
 
+    @app.post("/api/persons/{slug}/trimmed/{fname}/unassign")
+    def unassign_trimmed(slug: str, fname: str):
+        """Beiseitegelegtes Foto zurueck ins Sortieren (Undo einer Zuordnung bei voller Person)."""
+        ok = gallery.unassign_trimmed(slug, fname)
+        if ok:
+            gallery.refresh_guesses()
+        return {"ok": ok}
+
     @app.delete("/api/persons/{slug}/trimmed/{fname}")
     def delete_trimmed(slug: str, fname: str):
         gallery.delete_trimmed(slug, fname)
