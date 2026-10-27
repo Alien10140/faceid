@@ -16,6 +16,7 @@
   - Move: tap a person pile, key 1–9, drag faces onto a pile (mouse), or the person search (P).
   - New person: "New person" pile or key N (inline name field, Enter saves, Esc cancels).
   - Full snapshot: ⛶ on a face or key F. Close: Esc, Close, click outside.
+  - Checks (header): recognition test plus speed, coverage and why-no-face measurements.
   - Undo: Z or the toast button. Discards and photo deletions commit after the toast unless undone.
 -->
 <style>
@@ -526,7 +527,7 @@ dialog::backdrop{background:oklch(12% .01 50 / .72)}
   <span class="sp"></span>
   <span class="hstat" id="hstat"><span class="status-dot" id="hdot"></span><span id="htext">connecting…</span></span>
   <button class="b" data-view="history" aria-label="History" data-tip="History" data-tipsub="every recognition, with the face it used">↺ <span class="txt">History</span></button>
-  <button class="b" data-view="tools" id="toolsBtn" hidden aria-label="Tools" data-tip="Tools" data-tipsub="deeper measurements">⌁ <span class="txt">Tools</span></button>
+  <button class="b" data-view="checks" aria-label="Checks" data-tip="Checks" data-tipsub="does recognition work, how fast, what is missing">✓ <span class="txt">Checks</span></button>
   <button class="b" data-view="log" aria-label="Log" data-tip="Service log">≡ <span class="txt">Log</span></button>
   <button class="b" data-view="settings" aria-label="Settings" data-tip="Settings">⚙ <span class="txt">Settings</span></button>
   <button class="b" id="themeBtn" aria-label="Switch light or dark" data-tip="Light / dark">◐</button>
@@ -596,11 +597,10 @@ const ICON={
 const img=(src,fallback)=>`<span class="face"><img src="${esc(src)}" alt="" loading="lazy" decoding="async"${fallback?` onerror="this.onerror=null;this.src='${esc(fallback)}'"`:''} style="width:100%;height:100%;object-fit:cover;display:block"></span>`;
 
 /* ================= state ================= */
-let view=store.get('faceid.view','sort');if(!['sort','people','add','history','settings','log','tools'].includes(view))view='sort';
+let view=store.get('faceid.view','sort');if(view==='tools')view='checks';if(!['sort','people','add','history','settings','log','checks'].includes(view))view='sort';
 let persons={},clusters=[],health=null,SUG=.4,lastSeen={},ignoredGroups=null;
 let sel=new Set(),lastClick=null,camF='all',openCards=new Set(),newOpen=false,landed=null,recent={},undoStack=[],busy=false;
 let openRow=null,showAll=false,peopleView=store.get('faceid-b-people','list'),peopleTab='people';
-const advanced=()=>store.get('faceid.advanced','0')==='1';
 
 const personImg=(slug,f)=>`data/persons/${enc(slug)}/${enc(f)}`;
 const unkImg=id=>`data/unknowns/${enc(id)}.jpg`;
@@ -639,11 +639,11 @@ setInterval(async()=>{ /* keep counts fresh; reload the queue when it changed an
 /* ================= render + routing ================= */
 function render(){
   document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-current',b.dataset.view===view?'page':'false'));
-  $('#navN').textContent=allFaces().length;$('#toolsBtn').hidden=!advanced();
+  $('#navN').textContent=allFaces().length;
   document.body.classList.remove('rail-in-view');
-  if(view==='sort')renderSort();else{renderSel();({people:renderPeople,add:renderAdd,history:renderHistory,settings:renderSettings,log:renderLog,tools:renderTools}[view]||renderSort)()}
+  if(view==='sort')renderSort();else{renderSel();({people:renderPeople,add:renderAdd,history:renderHistory,settings:renderSettings,log:renderLog,checks:renderChecks}[view]||renderSort)()}
 }
-function go(v){if(v==='tools'&&!advanced())v='settings';view=v;store.set('faceid.view',v);sel.clear();newOpen=false;clearTimeout(logTimer);render();scrollTo(0,0)}
+function go(v){view=v;store.set('faceid.view',v);sel.clear();newOpen=false;clearTimeout(logTimer);render();scrollTo(0,0)}
 
 /* ================= toast + undo ================= */
 let tt;
@@ -948,8 +948,8 @@ async function renderLog(){
 }
 
 /* ================= settings ================= */
-const SECTIONS=[['matching','Matching'],['fallback','When there is no face'],['gallery','Keeping the gallery clean'],['check','Does it work?'],['backup','Backup']];
-let setTab=store.get('faceid.settingsTab','matching'),cfg=null,draft=null;
+const SECTIONS=[['matching','Matching'],['fallback','When there is no face'],['gallery','Keeping the gallery clean'],['backup','Backup']];
+let setTab=store.get('faceid.settingsTab','matching'),cfg=null,draft=null;if(!SECTIONS.some(([k])=>k===setTab))setTab='matching';
 const TH={match_threshold:['Recognised at or above','Higher means fewer false matches, but more real people land in sorting.'],
   unknown_threshold:['Definitely unknown below','Below this a face is treated as a clear stranger.'],
   suggest_threshold:['Suggest a person from','Keep it below the recognition threshold so borderline faces get pre-sorted.'],
@@ -986,11 +986,6 @@ async function renderSettings(){
     num('trimmed_keep','Keep set-aside photos',val('trimmed_keep'),0,100,'How many set-aside photos to keep per person for review (0 = delete immediately).')+
     `<div class="srow"><label for="t-dedupe_threshold">Duplicate sensitivity</label><div class="ctl"><span class="rng">0.50</span><input type="range" id="t-dedupe_threshold" data-k="dedupe_threshold" min="0.50" max="0.95" step="0.01" value="${val('dedupe_threshold')}"><span class="rng">0.95</span><span class="val" id="v-dedupe_threshold">${(+val('dedupe_threshold')).toFixed(2)}</span></div><div class="help" id="dedupePrev">Sets aside photos very similar to one you already have. Lower removes more; camera crops score lower than phone photos, so try 0.60–0.70.</div></div>
     <div class="srow"><span class="lbl">Remove duplicates</span><div class="ctl"><button class="b" id="dedupeRun">Remove duplicates in all people…</button></div><div class="help">Uses the sensitivity above. Restorable.</div></div>`;
-  }else if(setTab==='check'){
-    body=`<h2>Does it work?</h2><p class="intro">Tests the gallery against itself (real ground truth) and against recent events. Runs in the background for a few minutes. Nothing changes.</p>
-    <div class="srow"><label for="andays">Also probe real events</label><div class="ctl"><select id="andays"><option value="0">gallery only</option><option value="1">last day</option><option value="3" selected>last 3 days</option><option value="7">last 7 days</option></select><button class="b hot" id="anRun">Measure recognition</button></div><div class="help">The gallery test needs no camera access; the event probe downloads one snapshot per event.</div></div>
-    <div class="result" id="anbox">Loading…</div>
-    <div class="srow"><span class="lbl">Tools</span><div class="ctl"><label class="chk"><input type="checkbox" id="advOn" ${advanced()?'checked':''}> Show the Tools page</label></div><div class="help">Deeper measurements without a terminal: how fast recognition is, how well each person is covered, why events yield no face. This switch lives in this browser only.</div></div>`;
   }else{
     const b=cfg.backup;
     body=`<h2>Backup</h2><p class="intro">A backup holds your gallery — people and ignored faces — not the faces waiting in sorting.</p>
@@ -1006,7 +1001,7 @@ async function renderSettings(){
   const dirty=Object.keys(draft).length;
   main.innerHTML=`<div class="ph"><h1>Settings</h1></div><div class="settings"><nav class="snav" aria-label="Settings sections">${SECTIONS.map(([k,l])=>`<button data-st="${k}" aria-current="${setTab===k}">${l}</button>`).join('')}</nav>
     <section class="sett">${body}${dirty?`<div class="dirty" role="status"><p><b>${dirty} unsaved change${dirty>1?'s':''}</b> — they apply live once saved.</p><button class="b" id="setDiscard">Discard</button><button class="b hot" id="setSave">Save settings</button></div>`:''}</section></div>`;
-  if(setTab==='check')renderAnalysis();if(setTab==='backup')renderBackups();if(setTab==='gallery')dedupePreview();
+  if(setTab==='backup')renderBackups();if(setTab==='gallery')dedupePreview();
 }
 function readCtl(el){if(el.type==='checkbox')return el.checked;if(el.dataset.list)return el.value.split(',').map(s=>s.trim()).filter(Boolean);if(el.type==='number'||el.type==='range')return +el.value;return el.value.trim()}
 function setDraft(el){const k=el.dataset.k,v=readCtl(el),orig=k.startsWith('backup_')?cfg.backup[k.slice(7)]:(k in cfg.thresholds?cfg.thresholds[k]:cfg[k]);
@@ -1043,16 +1038,18 @@ const TOOL_FMT={
   delay:d=>d.error?`<span class="err">${esc(d.error)}</span>`:!d.n?`<p>${esc(d.note||'Nothing recorded yet.')}</p>`:`<p><b>${d.n}</b> recognitions · median <b>${secs(d.median)}</b> · fastest ${secs(d.min)} · 9 of 10 within ${secs(d.p90)}</p>`+tbl([['attempt',r=>r.attempt],['n',r=>r.n],['median',r=>secs(r.median)],['fastest',r=>secs(r.min)],['slowest',r=>secs(r.max)]],d.by_attempt||[])+`<p>Attempt 1 is not FaceID's speed — it is how long Frigate takes to produce a usable snapshot.</p>`+tbl([['camera',r=>esc(r.camera)],['n',r=>r.n],['median',r=>secs(r.median)]],d.by_camera||[]),
   coverage:d=>d.error?`<span class="err">${esc(d.error)}</span>`:tbl([['person',r=>esc(r.name)],['photos',r=>r.photos],['alike',r=>r.diversity==null?'—':r.diversity.toFixed(2)],['frontal',r=>r.frontal],['half',r=>r.half],['profile',r=>r.profile],['grey',r=>r.greyscale],['self test',r=>r.self_test+'%'],['cameras',r=>r.cameras.map(c=>esc(c.camera)+' '+c.n).join(', ')||'—']],d.people||[])+((d.advice||[]).length?'<p>What is missing (weakest first):</p><ul>'+d.advice.map(a=>`<li><b>${esc(a.name)}</b>: ${a.missing.map(esc).join(', ')}</li>`).join('')+'</ul>':'<p>Every person is broadly covered.</p>'),
   'why-no-face':d=>{if(d.error)return `<span class="err">${esc(d.error)}</span>`;const r=d.reasons||{},t=d.events||0,pc=n=>t?` (${Math.round(100*n/t)}%)`:'';return `<p><b>${t}</b> events · usable face <b>${r.ok||0}</b>${pc(r.ok||0)} · no face ${r['no face']||0} · too small ${r['too small']||0} · unsure ${r.uncertain||0}</p>`+tbl([['camera',x=>esc(x.camera)+(x.used?'':' (not processed)')],['events',x=>x.events],['ok',x=>x.ok],['no face',x=>x.no_face],['too small',x=>x.too_small],['unsure',x=>x.uncertain]],d.cameras||[])}};
-async function renderTools(){
-  main.innerHTML='<div class="loading"><span class="spin"></span></div>';const d=await api('api/tools').catch(()=>null);if(view!=='tools')return;
-  if(!d){main.innerHTML='<div class="empty"><h2>Tools unavailable.</h2></div>';return}
-  main.innerHTML=`<div class="ph"><h1>Tools</h1></div><p class="lead">Measurements that used to need a terminal. They read what FaceID already has — nothing here changes your gallery.</p><div class="sett">${d.tools.map(t=>`<section class="tool"><h3>${esc(t.label)}</h3><p>${esc(t.about)}</p>
+async function renderChecks(){
+  main.innerHTML='<div class="loading"><span class="spin"></span></div>';const d=await api('api/tools').catch(()=>null);if(view!=='checks')return;
+  const rec=`<section class="tool"><h3>Does it recognise the right people?</h3><p>Tests the gallery against itself (real ground truth) and against recent events, and tells you whether the recognition threshold has room. Runs in the background for a few minutes; the event probe downloads one snapshot per event.</p>
+    <div class="ctl" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><label for="andays">Also probe real events</label><select id="andays" class="b"><option value="0">gallery only</option><option value="1">last day</option><option value="3" selected>last 3 days</option><option value="7">last 7 days</option></select><button class="b hot" id="anRun">Run</button></div>
+    <div class="result" id="anbox" style="margin-top:12px">Loading…</div></section>`;
+  main.innerHTML=`<div class="ph"><h1>Checks</h1></div><p class="lead">Measurements of how well FaceID works. They only read what FaceID already has — nothing here changes your gallery or your settings.</p><div class="sett">${rec}${d?d.tools.map(t=>`<section class="tool"><h3>${esc(t.label)}</h3><p>${esc(t.about)}</p>
     <div class="ctl" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${(t.days||[]).length?`<label for="td-${t.id}">${esc(t.days_label||'Period')}</label><select id="td-${t.id}" class="b">${t.days.map(x=>`<option value="${x}" ${x===(t.days[1]??t.days[0])?'selected':''}>${x?x+' day'+(x>1?'s':''):'everything'}</option>`).join('')}</select>`:''}<button class="b hot" data-tool="${t.id}">Run</button></div>
-    <div id="tb-${t.id}"></div></section>`).join('')}</div>`;
-  for(const t of d.tools)paintTool(t.id,d.state[t.id]);
+    <div id="tb-${t.id}"></div></section>`).join(''):'<p class="err">The other measurements are unavailable.</p>'}</div>`;
+  renderAnalysis();if(d)for(const t of d.tools)paintTool(t.id,d.state[t.id]);
 }
 function paintTool(id,st){const el=$('#tb-'+id);if(!el||!st)return;const b=document.querySelector(`[data-tool="${id}"]`);
-  if(st.running){if(b)b.disabled=true;el.innerHTML=`<p><span class="spin"></span> Measuring… ${st.processed}/${st.total||'?'}</p>`;setTimeout(async()=>{if(view==='tools')paintTool(id,await api('api/tools/'+id).catch(()=>null))},1000)}
+  if(st.running){if(b)b.disabled=true;el.innerHTML=`<p><span class="spin"></span> Measuring… ${st.processed}/${st.total||'?'}</p>`;setTimeout(async()=>{if(view==='checks')paintTool(id,await api('api/tools/'+id).catch(()=>null))},1000)}
   else{if(b)b.disabled=false;if(st.result)el.innerHTML=(TOOL_FMT[id]||(r=>`<pre>${esc(JSON.stringify(r,null,2))}</pre>`))(st.result)}}
 
 /* ================= events ================= */
@@ -1144,7 +1141,6 @@ document.addEventListener('change',async e=>{
   const t=e.target;
   if(t.id==='file'){[...t.files].forEach(f=>enr.files.push({file:f,url:URL.createObjectURL(f),state:'wait'}));enr.result=null;t.value='';renderAdd();return}
   if(t.id==='hlim'){histLimit=+t.value;renderHistory();return}
-  if(t.id==='advOn'){store.set('faceid.advanced',t.checked?'1':'0');$('#toolsBtn').hidden=!t.checked;toast(t.checked?'Tools page shown in the header':'Tools page hidden',false);return}
   if(t.dataset.restore){const f=t.files[0];if(!f)return;const merge=t.dataset.restore==='merge';
     if(!merge&&!await ask('Replace everything with this backup?','<p>All current people and ignored faces are replaced by the backup. This cannot be undone.</p>','Replace',true)){t.value='';return}
     const fd=new FormData();fd.append('file',f);toast('Restoring…',false);const r=await api('api/restore?merge='+merge,{method:'POST',body:fd});t.value='';await loadAll();toast(`Restored ${r.restored_files} file(s) (${r.mode}) — ${r.persons} people`,false);return}

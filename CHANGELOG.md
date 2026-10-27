@@ -14,8 +14,11 @@ update dialog; standalone users can watch GitHub releases.
   after the undo toast is gone.
 - **People, history, log, tools and settings in the same design**, with nothing left out:
   upload photos, rename, favourites, set-aside photos with their reason, the ignore list,
-  *was wrong* analysis, measurements, backup and restore. Settings are split into five
+  *was wrong* analysis, measurements, backup and restore. Settings are split into four
   sections and keep unsaved changes in one bar instead of saving field by field.
+- **One Checks page for all measurements**, always in the header: the recognition test
+  (formerly *Settings → Does it actually work?*) first, then speed, coverage and why events
+  yield no face (formerly the opt-in *Tools* tab). Settings now hold only settings.
 - **Key image per person.** `POST /api/persons/{slug}/cover` with `{"file": …}` (or
   `null`) picks the photo that represents a person everywhere in the interface; it is
   stored in `meta.json` and travels with backups. Matching is unaffected. If that photo is
