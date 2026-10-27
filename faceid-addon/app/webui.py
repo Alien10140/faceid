@@ -61,10 +61,18 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
             return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="FaceID"'})
 
     app.mount("/data", StaticFiles(directory=data_dir), name="data")
+    if (static_dir / "assets").is_dir():
+        # Schriften und Logo der Oberflaeche — lokal, damit die App nichts von aussen nachlaedt.
+        app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
 
     @app.get("/")
     def index():
         return FileResponse(static_dir / "index.html")
+
+    @app.get("/classic")
+    def classic():
+        # Die bisherige Oberflaeche, eine Version lang als Rueckweg neben der neuen.
+        return FileResponse(static_dir / "classic.html")
 
     @app.get("/api/persons")
     def persons():
@@ -169,11 +177,29 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
     def set_favorite(slug: str, body: FavBody):
         return {"ok": gallery.set_favorite(slug, body.favorite)}
 
+    class CoverBody(BaseModel):
+        file: str | None = None
+
+    @app.post("/api/persons/{slug}/cover")
+    def set_cover(slug: str, body: CoverBody):
+        """Key-Image: das Foto, das die Person in der Oberflaeche vertritt."""
+        if not gallery.set_cover(slug, body.file):
+            raise HTTPException(404, "unknown person or photo")
+        return {"ok": True, "cover": body.file}
+
     @app.post("/api/persons/{slug}/trimmed/{fname}/restore")
     def restore_trimmed(slug: str, fname: str):
         ok = gallery.restore_trimmed(slug, fname)
         if ok:
             gallery.request_refresh_guesses()
+        return {"ok": ok}
+
+    @app.post("/api/persons/{slug}/trimmed/{fname}/unassign")
+    def unassign_trimmed(slug: str, fname: str):
+        """Beiseitegelegtes Foto zurueck ins Sortieren (Undo einer Zuordnung bei voller Person)."""
+        ok = gallery.unassign_trimmed(slug, fname)
+        if ok:
+            gallery.refresh_guesses()
         return {"ok": ok}
 
     @app.delete("/api/persons/{slug}/trimmed/{fname}")

@@ -1,0 +1,1302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FaceID</title>
+<style>
+:root{
+  --bg:oklch(18% .012 80);--panel:oklch(22% .012 80);--line:oklch(32% .01 80);
+  --fg:oklch(88% .01 90);--dim:oklch(62% .01 90);--acc:oklch(85% .25 130);
+  --warn:oklch(75% .18 60);--bad:oklch(65% .2 25);
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;--sans:system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--sans)}
+header{display:flex;align-items:baseline;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line)}
+header h1{font:700 15px var(--mono);color:var(--acc);letter-spacing:.08em}
+header .stat{font:12px var(--mono);color:var(--dim)}
+table.t{border-collapse:collapse;width:auto;max-width:100%;font-size:12px;margin:2px 0 14px}
+table.t th{text-align:right;color:var(--dim);font-weight:400;padding:3px 10px 3px 0;
+  border-bottom:1px solid var(--line)}
+table.t th:first-child,table.t td:first-child{text-align:left}
+table.t td{text-align:right;padding:3px 10px 3px 0;border-bottom:1px solid var(--line)}
+table.t tr:last-child td{border-bottom:0}
+nav{display:flex;gap:0;border-bottom:1px solid var(--line)}
+nav button{background:none;border:0;border-right:1px solid var(--line);color:var(--dim);
+  font:13px var(--mono);padding:8px 18px;cursor:pointer}
+nav button.on{color:var(--acc);background:var(--panel)}
+/* Volle Breite: die Ansicht besteht ueberwiegend aus Kachelrastern, und ein Deckel bei
+   1200px liess auf breiten Schirmen rechts eine Luecke — es sah aus, als fehle etwas.
+   Nur die Erklaerabsaetze bleiben begrenzt, denn ueber die ganze Breite laufender
+   Fliesstext ist schlecht lesbar. */
+main{padding:16px}
+/* Fliesstext bleibt lesbar breit, egal wie tief er sitzt. Bei kurzen Labels in einer
+   Zeile bleibt die Regel wirkungslos — sie deckelt nur, was sonst ueber die ganze
+   Breite laufen wuerde. */
+.stat{max-width:105ch}
+h2{font:600 12px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.12em;margin:18px 0 8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px}
+.tile{position:relative;border:1px solid var(--line);background:var(--panel)}
+.tile img{width:100%;aspect-ratio:1;object-fit:cover;display:block;filter:saturate(.9)}
+.tile .score{position:absolute;bottom:0;left:0;right:0;font:11px var(--mono);
+  background:color-mix(in oklab,var(--bg) 80%,transparent);padding:1px 4px;color:var(--acc)}
+.tile.sel{outline:2px solid var(--acc);outline-offset:-2px}
+/* Verlauf: gleich hohe Kacheln. Die Ausschnitte haben sehr verschiedene Seiten-
+   verhaeltnisse, und ohne feste Hoehen rutschen Text und Knopf zeilenweise
+   auseinander — die Reihe sieht dann gestaucht aus. */
+/* eigenes Raster: das allgemeine .grid hat ~96px-Spalten, eine breitere Kachel darin
+   ragt in die Nachbarzelle und wird von ihr beschnitten — genau so verschwanden die
+   Knopfbeschriftungen. Die Kachel bekommt deshalb KEINE feste Breite, das Raster gibt
+   sie vor. */
+.hgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:6px}
+.hcard{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.hcard img{width:100%;height:150px;object-fit:cover;display:block;cursor:zoom-in}
+.hcard .meta{padding:4px 6px;font:11px var(--mono);color:var(--dim);line-height:1.5;
+  flex:1 0 auto;min-width:0}
+.hcard .meta b,.hcard .meta .sub{display:block;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.hcard .meta b{color:var(--fg)}
+.hcard button{width:100%;border-radius:0}
+.hcard .nowis{color:var(--acc);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hcard button{white-space:nowrap;overflow:hidden}
+.tile button.x{position:absolute;top:0;right:0;background:var(--bg);border:0;color:var(--bad);
+  font:12px var(--mono);padding:2px 6px;cursor:pointer;display:none}
+.tile button.u{position:absolute;top:0;left:0;background:var(--bg);border:0;color:var(--warn);
+  font:12px var(--mono);padding:2px 6px;cursor:pointer;display:none}
+.tile:hover button.x,.tile:hover button.u{display:block}
+.cluster{border:1px solid var(--line);padding:10px;margin-bottom:14px}
+.cluster.sugg{border-color:var(--acc)}
+.cluster.sugg .head b{color:var(--acc)}
+.tile .x{position:absolute;top:0;right:0;background:var(--bg);border:0;color:var(--bad);font:12px var(--mono);padding:2px 6px;cursor:pointer}
+.cluster .head{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+.cluster .head b{font:600 13px var(--mono);color:var(--fg)}
+.cluster .guess{font:12px var(--mono);color:var(--warn);display:inline-flex;align-items:center;gap:6px;position:relative}
+.cluster .guess-thumb{width:32px;height:32px;border-radius:4px;object-fit:cover;border:1px solid var(--warn);cursor:zoom-in;background:var(--panel);flex:0 0 auto}
+.cluster .guess-pop{display:none;position:absolute;left:0;top:calc(100% + 6px);z-index:20;background:var(--panel);border:1px solid var(--acc);border-radius:6px;padding:6px;box-shadow:0 10px 28px rgba(0,0,0,.55)}
+.cluster .guess:hover .guess-pop{display:block}
+.cluster .guess-pop img{width:120px;height:120px;object-fit:cover;border-radius:4px;display:block}
+.cluster .guess-pop .cap{font:10px var(--mono);color:var(--dim);margin-top:4px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cluster.sugg .head .guess-thumb{border-color:var(--acc)}
+.person{border:1px solid var(--line);padding:10px;margin-bottom:14px}
+.person .head{display:flex;align-items:baseline;gap:12px;margin-bottom:8px}
+.person .head b{font:600 14px var(--sans)}
+.person .head .n{font:12px var(--mono);color:var(--dim)}
+.person .head button.fav{background:none;border:0;color:var(--dim);font-size:16px;cursor:pointer;padding:0 4px;line-height:1}
+.person .head button.fav.on{color:var(--acc)}
+.act,button.act{background:var(--acc);border:0;color:oklch(20% .02 130);font:600 12px var(--mono);
+  padding:5px 12px;cursor:pointer;display:inline-block;line-height:1.35;text-decoration:none;vertical-align:middle}
+.ghost,button.ghost{background:none;border:1px solid var(--line);color:var(--dim);font:12px var(--mono);
+  padding:4px 10px;cursor:pointer;display:inline-block;line-height:1.35;text-decoration:none;vertical-align:middle}
+.ghost:hover,button.ghost:hover{color:var(--fg);border-color:var(--fg)}
+/* Zustaende der Handlungsknoepfe. Vorher hatte .act keinen einzigen: Zeigen,
+   Druecken und Tastaturfokus sahen identisch aus, obwohl ASSIGN und "Track as new"
+   Personen anlegen. Gemessen statt geschaetzt: Grundzustand zu Hover 1.66:1, Hover zu
+   Active 1.50:1 — unter etwa 1.5:1 sieht man den Wechsel nicht. Der dunkle Text bleibt
+   dabei ueber 4.5:1 (7.3:1 auf Hover, 4.9:1 auf Active). Der Fokusring liegt dank
+   outline-offset auf dem Panel und steht dort mit 13:1. */
+.act:hover,button.act:hover{background:oklch(70% .25 130)}
+.act:active,button.act:active{background:oklch(60% .20 130);transform:translateY(1px)}
+.ghost:active,button.ghost:active{background:color-mix(in oklab,var(--fg) 12%,transparent)}
+.act:focus-visible,button.act:focus-visible,.ghost:focus-visible,button.ghost:focus-visible{
+  outline:2px solid var(--fg);outline-offset:2px}
+.act[disabled],button.act[disabled],.ghost[disabled],button.ghost[disabled]{
+  opacity:.45;cursor:not-allowed}
+/* Die einzige Bewegung hier ist der 1px-Versatz beim Druecken — genau der gehoert
+   abgeschaltet. 'transition:none' waere wirkungslos gewesen: keine deklariert. */
+@media (prefers-reduced-motion:reduce){.act:active,button.act:active{transform:none}}
+/* Regler in der Akzentfarbe statt im Browser-Blau — das Blau war die einzige Farbe
+   der Oberflaeche, die nicht aus der Palette stammte, und stand direkt neben den
+   gruenen Zahlenwerten. Gilt zugleich fuer Ankreuzfelder. */
+input[type=range],input[type=checkbox]{accent-color:var(--acc)}
+input,select{background:var(--panel);border:1px solid var(--line);color:var(--fg);
+  font:13px var(--mono);padding:5px 8px}
+table{border-collapse:collapse;width:100%;font:13px var(--mono)}
+td,th{border-bottom:1px solid var(--line);padding:6px 10px;text-align:left}
+th{color:var(--dim);font-weight:400;font-size:11px;text-transform:uppercase;letter-spacing:.1em}
+td.p{color:var(--acc)} td.u{color:var(--warn)}
+.empty{color:var(--dim);font:13px var(--mono);padding:20px 0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
+#toast{position:fixed;bottom:16px;right:16px;background:var(--panel);border:1px solid var(--acc);
+  color:var(--fg);font:12px var(--mono);padding:8px 14px;display:none}
+.tile button.z{position:absolute;bottom:18px;right:0;background:var(--bg);border:0;color:var(--acc);
+  font:12px var(--mono);padding:2px 6px;cursor:pointer;display:none}
+.tile:hover button.z{display:block}
+.trimgrid .tile img{filter:grayscale(1) brightness(.55);transition:filter .15s}
+.trimgrid .tile:hover img{filter:none}
+.tile.simhi{outline:3px solid var(--acc);outline-offset:-3px}
+.tile.simlow{outline:2px solid var(--dim);outline-offset:-2px}
+.tile .simscore{position:absolute;top:0;left:0;background:var(--bg);color:var(--fg);font:10px var(--mono);padding:1px 4px;z-index:2}
+.tile.simhi img{filter:none;opacity:1}
+.tile.crossrisk{outline:2px solid var(--warn);outline-offset:-2px}
+/* unten, nicht oben: oben sitzen die Knoepfe zum Zurueckholen und Loeschen, das Band
+   hat sie sonst verdeckt. z-index bleibt niedriger als der der Knoepfe. */
+.tile .crosstag{position:absolute;bottom:0;left:0;right:0;background:var(--warn);color:oklch(20% .02 60);
+  font:600 9px var(--mono);padding:1px 3px;z-index:1;text-align:center;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile button.u,.tile button.x{z-index:3}
+.trimlabel{display:inline-block;font:600 10px var(--mono);letter-spacing:.1em;color:var(--warn);border:1px solid var(--warn);border-radius:3px;padding:1px 6px;margin-bottom:4px}
+#lightbox{position:fixed;inset:0;background:color-mix(in oklab,var(--bg) 88%,transparent);
+  display:none;align-items:center;justify-content:center;z-index:10;cursor:zoom-out;flex-direction:column;gap:8px}
+#lightbox img{max-width:94vw;max-height:88vh;border:1px solid var(--acc)}
+#lightbox .cap{font:12px var(--mono);color:var(--dim)}
+  .logline{font:12px/1.55 var(--mono);white-space:pre-wrap;word-break:break-word;padding:1px 0}
+  .logline .t{color:var(--dim)}
+  .lv-WARNING{color:#e0a030}
+  .lv-ERROR,.lv-CRITICAL{color:#e05555}
+  .logwrap{background:var(--panel);border:1px solid var(--line);padding:10px;
+           max-height:70vh;overflow:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>FACEID</h1>
+  <span class="stat" id="health">—</span>
+</header>
+<nav>
+  <button data-t="unknowns" class="on" title="review queue: unrecognized faces, grouped by person">UNKNOWN</button>
+  <button data-t="persons" title="your gallery: enrolled people and their reference faces">PERSONS</button>
+  <button data-t="ignored" title="people you don't track: never notified, matched or resurfaced">IGNORED</button>
+  <button data-t="settings" title="matching thresholds, backup and restore">SETTINGS</button>
+  <button data-t="history" title="recognition history — with the face image FaceID used, and a way to say it was wrong">HISTORY</button>
+  <button data-t="log" title="recent service log — what FaceID is doing, and why nothing was recognised">LOG</button>
+  <button data-t="tools" title="deeper measurements: speed, gallery coverage, why events yield no face" hidden>TOOLS</button>
+</nav>
+<main id="main"></main>
+<div id="toast"></div>
+<div id="lightbox" onclick="this.style.display='none'"><img id="lbimg" src=""><span class="cap" id="lbcap"></span></div>
+
+<script>
+const $=s=>document.querySelector(s), main=$('#main');
+let tab='unknowns', persons={}, selected=new Set(), suggestThr=0.40;
+
+async function j(url,opt){const r=await fetch(url,opt);if(!r.ok)throw new Error(await r.text());return r.json()}
+// FastAPI verpackt den Grund in {"detail": ...} — ohne das Auspacken sieht der
+// Nutzer nur rohes JSON und weiss nicht, was an seiner Eingabe falsch war.
+// Netzwerk- und Serverfehler sichtbar machen, statt sie zu verschlucken. Die
+// Handler rufen 'await j(...)' an 56 Stellen in 25 Funktionen auf, die meisten ohne
+// eigenes catch — ohne das hier bleibt ein fehlgeschlagener Klick ein stilles
+// Nichts. Ein Platz statt 25 verhindert, dass der naechste Handler es wieder vergisst.
+window.addEventListener('unhandledrejection', ev => {
+  // Erst in die Konsole, dann der Toast: preventDefault() unterdrueckt die
+  // Standardausgabe des Browsers, und ein TypeError waere sonst nur noch ein auf
+  // 120 Zeichen gekuerzter Hinweis ohne Stapel — schlechter als vorher.
+  console.error('unhandled rejection:', ev.reason);
+  toast('Failed: ' + errText(ev.reason).slice(0, 120));
+  ev.preventDefault();
+});
+function errText(e){const s=String(e&&e.message||e);try{const d=JSON.parse(s).detail;if(d)return String(d);}catch(_){}return s}
+function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function guessPhoto(slug, preferred){
+  const p=persons[slug]; if(!p||!p.files||!p.files.length)return '';
+  if(preferred&&p.files.includes(preferred))return preferred;
+  // preferred missing (trimmed/deleted) → newest remaining file
+  return p.files[p.files.length-1];
+}
+function guessCue(name, scorePct, slug, preferred, star){
+  if(!name)return '';
+  const file=slug?guessPhoto(slug, preferred||''):'';
+  const label=(star?'★ Looks like ':'looks like ')+esc(name)+(scorePct!=null?` (${scorePct}%)`:'');
+  if(!file){
+    return star
+      ? `<b>★ Looks like ${esc(name)}</b>`
+      : `<span class="guess">${label}</span>`;
+  }
+  const src=`data/persons/${esc(slug)}/${esc(file)}`;
+  const thumb=`<img class="guess-thumb" src="${src}" loading="lazy" alt=""
+    data-url="${src}" data-cap="${esc(name)}"
+    onerror="this.style.display='none'"
+    onclick="event.stopPropagation();showFull(this.dataset.url,this.dataset.cap)">`;
+  const pop=`<span class="guess-pop"><img src="${src}" alt="" onerror="this.parentNode.style.display='none'"><div class="cap">${esc(name)}</div></span>`;
+  if(star){
+    return `<span class="guess"><b style="color:var(--acc)">★ Looks like ${esc(name)}</b>${thumb}${pop}</span>`;
+  }
+  return `<span class="guess">${thumb}<span>${label}</span>${pop}</span>`;
+}
+
+function fmtTs(ts){return new Date(ts*1000).toLocaleString(undefined,{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}
+// Wann das Ereignis passierte, nicht wann wir es verarbeitet haben — beim Verlaufs-Scan
+// liegen die Wochen auseinander.
+function fmtWhen(u){return fmtTs(u.event_ts||u.ts)}
+
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  tab=b.dataset.t;selected.clear();
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  render()});
+
+async function health(){try{const h=await j('api/health');
+  if(typeof h.suggest_threshold==='number')suggestThr=h.suggest_threshold;
+  const src=h.source==='folder'&&h.folder?`files ${h.folder.processed}${h.folder.scanning?' · scanning':''}`:`events ${h.open_events}`;
+  $('#health').textContent=`${h.persons} persons · queue ${h.queue} · ${src}`}catch(e){$('#health').textContent='offline'}}
+
+function personOptions(sel){
+  const es=Object.entries(persons).sort((a,b)=>a[1].name.localeCompare(b[1].name,undefined,{sensitivity:'base'}));
+  const opt=([s,p])=>`<option value="${s}"${s===sel?' selected':''}>${esc(p.name)}</option>`;
+  const favs=es.filter(([,p])=>p.favorite), rest=es.filter(([,p])=>!p.favorite);
+  let out='';
+  if(favs.length)out+=`<optgroup label="★ Favorites">${favs.map(opt).join('')}</optgroup>`;
+  if(rest.length)out+=(favs.length?`<optgroup label="Others">${rest.map(opt).join('')}</optgroup>`:rest.map(opt).join(''));
+  return out;
+}
+
+async function render(){
+  const t=tab;
+  // Kopfzeile mitziehen: sie haengt sonst am 10s-Intervall und zeigt nach dem Zuweisen
+  // sekundenlang die alten Zahlen — was wie ein Fehler aussieht, obwohl es nur alt ist.
+  // Absichtlich ohne await, die Ansicht soll darauf nicht warten.
+  health();
+  persons=await j('api/persons');
+  if(t!==tab)return;
+  if(tab==='unknowns')return renderUnknowns();
+  if(tab==='persons')return renderPersons();
+  if(tab==='ignored')return renderIgnored();
+  if(tab==='settings')return renderSettings();
+  if(tab==='history')return renderHistory();
+  if(tab==='log')return renderLog();
+  if(tab==='tools')return renderTools();
+  return renderPersons();
+}
+
+function backfillRow(bf){
+  const folder=bf.mode==='folder';
+  const status = bf.running
+    ? `${folder?'scanning folder':'scanning history'}… ${bf.processed}/${bf.total||'?'} ${folder?'files':'events'}`
+    : bf.result
+      ? bf.result.error
+        ? `scan failed: ${esc(bf.result.error)}`
+        : folder
+          ? `last scan: ${bf.result.processed} files processed, ${bf.result.faces} faces, ${bf.result.skipped} unchanged`
+          : `last scan: ${bf.result.faces} new faces, ${bf.result.known} already known, ${bf.result.no_face} without a face`
+      : folder?'watches completed recordings and adds faces to the review queue':'pulls faces from past camera events into the review queue';
+  return `<div class="row">
+    <select id="bfdays" title="how far back to scan" ${folder?'style="display:none"':''} ${bf.running?'disabled':''}>
+      <option value="7">last 7 days</option>
+      <option value="14" selected>last 14 days</option>
+      <option value="28">last 28 days</option>
+    </select>
+    <button class="act" title="${folder?'scan completed media in the configured folder':'pull faces from past Frigate events into this queue; known people get tagged retroactively'}" onclick="startBackfill()" ${bf.running?'disabled':''}>
+      ${bf.running?'SCANNING…':(folder?'SCAN RECORDING FOLDER':'SCAN CAMERA HISTORY')}</button>
+    <span class="stat">${status}</span>
+  </div>`;
+}
+async function startBackfill(){
+  try{
+    await j('api/backfill',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({days:+$('#bfdays').value})});
+    toast('Scan started');
+  }catch(e){toast('Scan already running')}
+  render();
+}
+async function renderUnknowns(){
+  let [clusters,bf]=await Promise.all([j('api/unknowns'),j('api/backfill')]);
+  if(tab!=='unknowns')return;
+  if(bf.running&&tab==='unknowns')setTimeout(()=>{if(tab==='unknowns')render()},4000);
+  if(!clusters.length){
+    main.innerHTML=backfillRow(bf)+'<div class="empty">No unknown faces in the queue.</div>';return}
+  const excluded=window._excludedIds||(window._excludedIds=new Set());
+  // Kamera-Filter wirkt auf die Cluster: ein Cluster bleibt, wenn mindestens ein
+  // Gesicht darin von der gewaehlten Kamera stammt.
+  const unkCams=camsOf(clusters.flat(), u=>u.camera);
+  if(camFilter.unknowns)
+    clusters=clusters.map(c=>c.filter(u=>u.camera===camFilter.unknowns)).filter(c=>c.length);
+  const n2s={}; Object.entries(persons).forEach(([sl,p])=>{n2s[p.name]=sl;});
+  const SUGGEST=suggestThr;
+  // Vorschlags-Gruppen (nach vermuteter Person) + Rest-Cluster
+  const byName={};
+  const rest=[];
+  clusters.forEach(c=>{
+    const keep=[];
+    c.forEach(it=>{
+      if(it.guess&&it.guess_score>=SUGGEST&&n2s[it.guess]&&!excluded.has(it.id))
+        (byName[it.guess]=byName[it.guess]||[]).push(it);
+      else keep.push(it);
+    });
+    if(keep.length)rest.push(keep);
+  });
+  const sugg=Object.keys(byName).sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}))
+    .map(name=>({name,slug:n2s[name],items:byName[name]}));
+  window._sugg=sugg; window._clusters=rest; window._n2s=n2s;
+
+  let html=backfillRow(bf)+(camSelect('unknowns', unkCams)
+      ? `<div class="row" style="margin-bottom:6px">${camSelect('unknowns', unkCams)}</div>` : '')
+    +`<div class="row">
+    <button class="act" title="assign every face whose best gallery match clears the recognition threshold" onclick="autoAssign()">APPLY SUGGESTIONS ≥50%</button>
+    <span class="stat">assigns every face whose best gallery match clears the recognition threshold</span>
+  </div>`;
+
+  // --- Vorschlags-Gruppen ---
+  html+=sugg.map((g,gi)=>{
+    const avg=Math.round(g.items.reduce((a,it)=>a+(it.guess_score||0),0)/g.items.length*100);
+    return `
+    <div class="cluster sugg" data-sg="${gi}">
+      <div class="head">
+        ${guessCue(g.name, null, (g.items[0]&&g.items[0].guess_top_slug)||g.slug, (g.items[0]&&g.items[0].guess_top_photo)||'', true)}
+        <span class="stat">${g.items.length} face(s) · avg ${avg}%</span>
+        <span style="flex:1"></span>
+        <select id="ssel${gi}" title="assign to a different person instead">${personOptions(g.slug)}</select>
+        <button class="act" title="assign all faces in this group" onclick="assignSuggestion(${gi})">ASSIGN ALL</button>
+        <button class="ghost" style="color:var(--warn);border-color:var(--warn)" title="never notify, match or resurface these faces" onclick="ignoreSuggestion(${gi})">ignore</button>
+      </div>
+      <div class="grid">${g.items.map(u=>`
+        <div class="tile">
+          <img src="data/unknowns/${u.id}.jpg" loading="lazy">
+          <span class="score">${(u.guess_score*100|0)}% · ${fmtWhen(u)}</span>
+          ${u.full_url?`<button class="z" title="full snapshot" data-url="${esc(u.full_url)}" data-cap="${esc(u.camera||'')} · ${esc(fmtWhen(u))}" data-fb="data/unknowns/${esc(u.id)}.jpg" onclick="showFull(this.dataset.url,this.dataset.cap,this.dataset.fb)">⛶</button>`:''}
+          <button class="x" title="not ${esc(g.name)} — pull this face out" onclick="rejectSuggestion('${u.id}')">×</button>
+        </div>`).join('')}
+      </div>
+    </div>`;}).join('');
+
+  // --- Rest-Cluster (unerkannt), Dropdown auf Guess vorgewaehlt ---
+  html+=rest.map((c,i)=>{
+    const gslug=(c[0].guess&&n2s[c[0].guess])?n2s[c[0].guess]:'';
+    return `
+    <div class="cluster" data-i="${i}">
+      <div class="head">
+        <b>CLUSTER ${String(i+1).padStart(2,'0')}</b>
+        <span class="stat">${c.length} capture${c.length>1?'s':''} · ${esc(c[0].camera||'')}</span>
+        ${c[0].guess?guessCue(c[0].guess,(c[0].guess_score*100|0),c[0].guess_top_slug||gslug,c[0].guess_top_photo||'',false):''}
+        <span style="flex:1"></span>
+        <select id="sel${i}" title="assign to an existing person"><option value="">— pick person —</option>${personOptions(gslug)}</select>
+        <input id="new${i}" placeholder="…exact name, or Track as new label" size="18" title="ASSIGN: exact new name only (not with a dropdown pick). Track as new: optional role label → Label-xxxxxx (empty → Unnamed-xxxxxx)">
+        <button class="act" title="assign selected tiles (or the whole cluster) to the chosen person" onclick="assignCluster(${i})">ASSIGN</button>
+        <button class="act" title="Create a new person; optional label becomes Label-xxxxxx (empty → Unnamed-xxxxxx)" onclick="trackAsNew(${i})">Track as new</button>
+        <button class="ghost" style="color:var(--warn);border-color:var(--warn)" onclick="ignoreCluster(${i})" title="never notify, match or resurface these faces">ignore</button>
+        <button class="ghost" title="delete garbage crops permanently — does NOT stop future matching; use ignore for people" onclick="discardCluster(${i})">discard</button>
+      </div>
+      <div class="grid">${c.map(u=>`
+        <div class="tile" data-id="${u.id}" title="click to select — actions then apply to the selection only" onclick="this.classList.toggle('sel')">
+          <img src="data/unknowns/${u.id}.jpg" loading="lazy">
+          <span class="score">${fmtWhen(u)}</span>
+          ${u.full_url?`<button class="z" title="full snapshot" data-url="${esc(u.full_url)}" data-cap="${esc(u.camera||'')} · ${esc(fmtWhen(u))}" data-fb="data/unknowns/${esc(u.id)}.jpg" onclick="event.stopPropagation();showFull(this.dataset.url,this.dataset.cap,this.dataset.fb)">⛶</button>`:''}
+        </div>`).join('')}
+      </div>
+    </div>`;}).join('');
+  main.innerHTML=html;
+}
+async function assignSuggestion(gi){
+  const g=window._sugg[gi]; if(!g)return;
+  const slug=$(`#ssel${gi}`).value||g.slug;
+  const ids=g.items.map(it=>it.id).filter(id=>!window._excludedIds.has(id));
+  if(!ids.length)return toast('Nothing to assign');
+  const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,person:slug})});
+  toast(`${r.assigned} face(s) assigned`);render();
+}
+async function ignoreSuggestion(gi){
+  const g=window._sugg[gi]; if(!g)return;
+  const ids=g.items.map(it=>it.id).filter(id=>!window._excludedIds.has(id));
+  const r=await j('api/unknowns/ignore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,person:'-'})});
+  toast(`${r.ignored} ignored`);render();
+}
+function hiliteSimilar(slug,items){
+  const card=document.getElementById('p-'+slug); if(!card)return;
+  const map=new Map((items||[]).map(x=>[x.file,x]));
+  card.querySelectorAll('.grid:not(.trimgrid) .tile[data-file]').forEach(t=>{
+    const it=map.get(t.dataset.file);
+    t.classList.toggle('simhi',!!it&&it.partner);
+    t.classList.toggle('simlow',!!it&&!it.partner);
+    let b=t.querySelector('.simscore');
+    if(it){
+      if(!b){b=document.createElement('span');b.className='simscore';t.appendChild(b);}
+      b.textContent=Math.round(it.score*100)+'%';
+    }else if(b){b.remove();}
+  });
+}
+function rejectSuggestion(id){(window._excludedIds||(window._excludedIds=new Set())).add(id);render();}
+// Auswahl ueber ALLE Gruppen — pro Gruppe gab es das schon, bei vielen Gruppen wird
+// das Einzelklicken aber zur Fleissarbeit.
+function selectAllIgnored(on){
+  document.querySelectorAll('#main .cluster[data-ig] .tile').forEach(t=>t.classList.toggle('sel',on));
+  const n=document.querySelectorAll('#main .cluster[data-ig] .tile.sel').length;
+  toast(on?`${n} anchor(s) selected`:'selection cleared');
+}
+async function deleteIgnoredSelected(){
+  const ids=[...document.querySelectorAll('#main .cluster[data-ig] .tile.sel')]
+              .map(t=>t.dataset.id).filter(Boolean);
+  if(!ids.length)return toast('nothing selected — use "select all" first');
+  if(!confirm(`Delete ${ids.length} ignore anchor(s)?\n\nThese people can resurface in the review queue afterwards.`))return;
+  await j('api/ignored/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids,person:''})});
+  toast(`${ids.length} anchor(s) deleted`);
+  renderIgnored();
+}
+
+async function renderIgnored(){
+  const clusters=await j('api/ignored');
+  if(tab!=='ignored')return;
+  if(!clusters.length){main.innerHTML='<div class="empty">Nobody on the ignore list. Use "ignore" on an unknown cluster or "ignore person" on a person card — ignored people are never notified, matched or resurfaced.</div>';return}
+  const total=clusters.reduce((a,c)=>a+c.length,0);
+  main.innerHTML=`<div class="row">
+      <span class="stat">${total} anchor face(s) in ${clusters.length} group(s) — never notified, never matched to a known person, never resurfaced.</span>
+      <span style="flex:1"></span>
+      <button class="ghost" title="select every anchor in every group" onclick="selectAllIgnored(true)">select all</button>
+      <button class="ghost" title="clear the selection" onclick="selectAllIgnored(false)">clear</button>
+      <button class="ghost" title="delete every selected anchor across all groups — those people may resurface as unknown" onclick="deleteIgnoredSelected()">delete selected</button>
+    </div>`
+    +clusters.map((c,i)=>`
+    <div class="cluster" data-ig="${i}">
+      <div class="head">
+        <b>IGNORED ${String(i+1).padStart(2,'0')}</b>
+        <span class="stat">${c.length} anchor${c.length>1?'s':''}${c.filter(x=>x.auto).length?` · ${c.filter(x=>x.auto).length} auto-learned`:''}${c[0].from_person?` · was "${esc(c[0].from_person)}"`:''}</span>
+        <span style="flex:1"></span>
+        <select id="igmv${i}" title="declare this group (or selected tiles) the same person as another group">
+          <option value="">— merge into —</option>
+          ${clusters.map((o,k)=>k===i?'':`<option value="${o[0].group}">group ${String(k+1).padStart(2,'0')}${o[0].from_person?` (${esc(o[0].from_person)})`:''}</option>`).join('')}
+        </select>
+        <select id="igas${i}" title="wrongly ignored? move faces to a real person as reference images"><option value="">— assign to person —</option>${personOptions()}</select>
+        <input id="igan${i}" placeholder="…or new name" size="12" title="or release this group as a brand-new person">
+        <button class="act" title="apply the chosen merge or person assignment to selected tiles (or the whole group)" onclick="applyIgnored(${i})">APPLY</button>
+        <button class="ghost" onclick="restoreIgnoredMany(${i})" title="move back to the review queue">↩</button>
+        <button class="ghost" title="delete selected/all anchors permanently — this person may resurface as unknown" onclick="deleteIgnoredMany(${i})">delete</button>
+      </div>
+      <div class="grid">${c.map(it=>`
+        <div class="tile" data-id="${it.id}" title="click to select — group actions then apply to the selection only" onclick="this.classList.toggle('sel')">
+          <img src="data/ignored/${it.id}.jpg" loading="lazy">
+          <span class="score">${it.auto?'auto · ':''}${fmtTs(it.ts)}</span>
+          <button class="u" title="back to review queue" onclick="event.stopPropagation();restoreIgnored('${it.id}')">↩</button>
+          <button class="x" title="delete permanently" onclick="event.stopPropagation();deleteIgnored('${it.id}')">×</button>
+        </div>`).join('')}
+      </div>
+    </div>`).join('');
+  window._ignClusters=clusters;
+}
+function ignSelection(i){
+  const box=document.querySelector(`.cluster[data-ig="${i}"]`);
+  const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
+  return sel.length?sel:window._ignClusters[i].map(it=>it.id);
+}
+async function applyIgnored(i){
+  const grp=$(`#igmv${i}`).value, person=$(`#igan${i}`).value.trim()||$(`#igas${i}`).value, ids=ignSelection(i);
+  if(grp&&person)return toast('Pick either a group or a person, not both');
+  if(!grp&&!person)return toast('Pick a target group or person first');
+  if(grp){
+    const r=await j('api/ignored/move',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids,group:grp})});
+    toast(`${r.moved} anchor(s) merged into the selected group`);
+  }else{
+    const r=await j('api/ignored/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids,person})});
+    toast(`${r.assigned} face(s) assigned to person`);
+  }
+  render();
+}
+async function restoreIgnoredMany(i){
+  const ids=ignSelection(i);
+  await j('api/ignored/restore',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids,person:'-'})});
+  toast(`${ids.length} face(s) moved back to the review queue`);render();
+}
+async function deleteIgnoredMany(i){
+  const ids=ignSelection(i);
+  if(!confirm(`Permanently delete ${ids.length} ignore anchor(s)? This person may resurface as unknown.`))return;
+  await j('api/ignored/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids,person:'-'})});
+  render();
+}
+async function ignoreCluster(i){
+  const box=document.querySelector(`.cluster[data-i="${i}"]`);
+  const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
+  const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
+  const r=await j('api/unknowns/ignore',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids,person:'-'})});
+  toast(`${r.ignored} face(s) ignored — they will not be matched or shown again`);render();
+}
+async function restoreIgnored(id){
+  await j('api/ignored/restore',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids:[id],person:'-'})});
+  toast('Face moved back to the review queue');render();
+}
+async function deleteIgnored(id){
+  await j('api/ignored/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids:[id],person:'-'})});
+  render();
+}
+function mintTrackName(label){
+  const base=(label||'').trim().replace(/\s+/g,' ')||'Unnamed';
+  const taken=new Set(Object.values(persons).map(p=>p.name.normalize('NFKC').trim().toLowerCase()));
+  const key=n=>n.normalize('NFKC').trim().toLowerCase();
+  for(let n=0;n<64;n++){
+    const b=new Uint8Array(3); crypto.getRandomValues(b);
+    const id=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');
+    const name=`${base}-${id}`;
+    if(!taken.has(key(name))) return name;
+  }
+  for(let n=2;;n++){
+    const name=`${base}-${Date.now().toString(16)}-${n}`;
+    if(!taken.has(key(name))) return name;
+  }
+}
+let assignInFlight=false;
+async function assignCluster(i){
+  if(assignInFlight)return;
+  const typed=$(`#new${i}`).value.trim(), picked=$(`#sel${i}`).value;
+  if(typed && picked)return toast('Clear the name field or the person dropdown — not both');
+  const person=typed||picked;
+  if(!person)return toast('Pick a person or enter a name');
+  const box=document.querySelector(`.cluster[data-i="${i}"]`);
+  const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
+  const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
+  assignInFlight=true;
+  try{
+    const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids,person})});
+    toast(`${r.assigned} face(s) → ${person}`);render();
+  }finally{assignInFlight=false}
+}
+async function trackAsNew(i){
+  if(assignInFlight)return;
+  if($(`#sel${i}`).value)return toast('Clear the person dropdown before Track as new');
+  const person=mintTrackName($(`#new${i}`).value);
+  const box=document.querySelector(`.cluster[data-i="${i}"]`);
+  const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
+  const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
+  assignInFlight=true;
+  try{
+    const r=await j('api/unknowns/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids,person})});
+    toast(`${r.assigned} face(s) → ${person}`);render();
+  }finally{assignInFlight=false}
+}
+function showFull(url,cap,fallback){const im=$('#lbimg');
+  im.onerror=fallback?()=>{im.onerror=null;im.src=fallback;$('#lbcap').textContent=(cap||'')+' · full snapshot expired, showing face crop'}:null;
+  im.src=url;$('#lbcap').textContent=cap||'';$('#lightbox').style.display='flex'}
+async function autoAssign(){
+  const r=await j('api/unknowns/auto_assign',{method:'POST'});
+  toast(r.total
+    ?`${r.total} assigned: ${Object.entries(r.assigned).map(([n,c])=>`${n} ×${c}`).join(', ')}`
+    :'No confident suggestions (≥50%) in the queue');
+  render();
+}
+async function discardCluster(i){
+  const box=document.querySelector(`.cluster[data-i="${i}"]`);
+  const sel=[...box.querySelectorAll('.tile.sel')].map(t=>t.dataset.id);
+  const ids=sel.length?sel:window._clusters[i].map(u=>u.id);
+  await j('api/unknowns/discard',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids,person:'-'})});
+  toast(`${ids.length} discarded`);render();
+}
+
+let logTimer=null, logLevel=null;
+// Kamera-Auswahl fuer die Listen. Erscheint erst ab zwei Kameras — bei einer waere
+// ein Filter nur ein Bedienelement ohne Wirkung. Idee aus einem Nutzerbeitrag (#14).
+let camFilter = {unknowns: '', history: ''};
+function camSelect(view, cams){
+  if(cams.length < 2) return '';
+  const cur = camFilter[view];
+  return `<span class="stat">camera:</span>
+    <select onchange="camFilter['${view}']=this.value;render()" style="margin-right:12px">
+      <option value=""${cur===''?' selected':''}>all (${cams.length})</option>
+      ${cams.map(c=>`<option value="${esc(c)}"${cur===c?' selected':''}>${esc(c)}</option>`).join('')}
+    </select>`;
+}
+function camsOf(items, get){
+  return [...new Set(items.map(get).filter(Boolean))].sort();
+}
+
+let historyLimit = 60;
+async function renderHistory(){
+  const r=await j(`api/history?limit=${historyLimit}`).catch(()=>({enabled:false,items:[]}));
+  if(!r.enabled){main.innerHTML='<div class="card"><div class="stat">The history is switched off (<code>history_keep: 0</code>).</div></div>';return}
+  const all=r.items||[];
+  const cams=camsOf(all, h=>h.camera);
+  const it=camFilter.history ? all.filter(h=>h.camera===camFilter.history) : all;
+  main.innerHTML=`<div class="card">
+    <h2>Recognition history</h2>
+    <div class="row" style="margin:-2px 0 8px">
+      ${camSelect('history', cams)}
+      <span class="stat">entries:</span>
+      <select onchange="historyLimit=+this.value;renderHistory()">
+        ${[30,60,120,200].map(n=>`<option value="${n}"${historyLimit===n?' selected':''}>${n}</option>`).join('')}
+      </select>
+    </div>
+    <div class="stat">Every recognition, with the <b>face image it actually used</b> — with Frigate, that is not the snapshot. Frigate keeps replacing that snapshot while an event runs, so checking one later usually shows a different moment, and sometimes a different person. Press <b>was wrong</b> on a mistake and FaceID works out which reference photo caused it. Where the gallery has changed since — a face you have assigned in the meantime — the card also shows who it would be matched to <b>now</b>.</div>
+    ${it.length?'':'<div class="stat" style="margin-top:8px">Nothing detected yet.</div>'}
+    <div class="hgrid" style="margin-top:8px">${it.map(h=>`
+      <div class="tile hcard">
+        <img src="data/history/${esc(h.img||h.id+'.jpg')}" loading="lazy" data-cap="${esc(h.person)} ${esc(h.score)} · ${esc(h.camera||'')}" onclick="showFull(this.src,this.dataset.cap)" title="${esc(h.person)} ${h.score} on ${esc(h.camera||'')}${h.zones&&h.zones.length?' · '+esc(h.zones.join(', ')):''}">
+        <div class="meta">
+          ${h.reported===false?`<span class="sub" title="This recognition was stored locally but not sent over MQTT (publishing is disabled or the broker was unreachable).">not reported</span> `:''}<b title="Detected as ${esc(h.person)} at ${esc(h.score)}${h.best_score?` — the picture shown is a later, clearer view of the same person from the same event (${esc(h.best_score)}), which is why it does not match the original score`:''}">${esc(h.person)} ${esc(h.score)}${h.best_score?` <span class="sub">· best view ${esc(h.best_score)}</span>`:''}</b>
+          <span class="sub">${fmtTs(h.ts)} · ${esc(h.camera||'')}</span>
+          ${h.now?(h.now.self
+            ? `<div class="nowis" title="You assigned this face to ${esc(h.now.person)}, so it is one of their reference photos now. It matches itself — that says nothing about how well ${esc(h.now.person)} is recognised.">now assigned: ${esc(h.now.person)}</div>`
+            : `<div class="nowis" title="This face would be matched to ${esc(h.now.person)} today — the gallery has changed since this was reported.">now: ${esc(h.now.person)} ${h.now.score}</div>`):''}
+        </div>
+        <button class="ghost" onclick="markWrong('${h.id}')">was wrong</button>
+      </div>`).join('')}</div>
+    ${it.length?`<div class="row" style="margin-top:10px"><button class="ghost" onclick="clearHistory()">clear the history</button></div>`:''}
+  </div>`;
+}
+async function markWrong(hid){
+  let r;
+  try{ r=await j(`api/history/${hid}/wrong`,{method:'POST'}) }
+  catch(e){ toast(String(e.message||e).slice(0,140)); return }
+  if(!r.found){ alert(`${r.person}: ${r.note||'cannot be analysed'}`); return }
+  const lines=r.photos.map(p=>`   ${p.sim}  ${p.file}`).join('\n');
+  const one=r.carried_by_one
+    ? `\n\nOne single photo carries this match: ${r.top_photo} at ${r.photos[0].sim}, while the next best is only ${r.photos[1].sim}. Without it the score drops to ${r.without_top}`
+      + (r.runner_up?`, and ${r.runner_up.name} (${r.runner_up.score}) would be the closest person instead.`:'.')
+    : `\n\nNo single photo is responsible — the match rests on several references (score without the best one: ${r.without_top}). Setting one aside will not fix this; the two people are genuinely close.`;
+  const msg=`Reported as ${r.person} (${r.score}).\n\nClosest reference photos of ${r.person}:\n${lines}${one}`;
+  if(r.carried_by_one && confirm(msg+`\n\nSet that photo aside? It is reversible — it lands in ${r.person}'s set-aside pile and can be restored.`)){
+    await j(`api/persons/${r.slug}/faces/${r.top_photo}/set-aside`,{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({reason:`caused a wrong recognition — matched a different person at ${r.score}`})});
+    toast('photo set aside');
+    persons=await j('api/persons');
+  } else if(!r.carried_by_one){ alert(msg) }
+}
+async function clearHistory(){
+  if(!confirm('Delete the whole history? The stored face images go with it.'))return;
+  await j('api/history/clear',{method:'POST'});renderHistory();
+}
+async function renderLog(){
+  const r=await j('api/logs?limit=400'+(logLevel?'&level='+logLevel:''));
+  if(tab!=='log')return;
+  const lines=r.lines||[];
+  const body=lines.map(l=>{
+    const t=new Date(l.ts*1000).toLocaleTimeString();
+    return `<div class="logline lv-${esc(l.level)}"><span class="t">${t}</span>  ${esc(l.logger)}  ${esc(l.msg)}</div>`;
+  }).join('')||'<span class="stat">no log lines yet</span>';
+  $('#main').innerHTML=`
+    <div class="row" style="margin-bottom:8px;align-items:center">
+      <b style="font:600 13px var(--sans)">SERVICE LOG</b>
+      <span class="stat">${lines.length} line(s)${logLevel?' · '+logLevel.toLowerCase()+' and above':''}</span>
+      <span style="flex:1"></span>
+      <button class="act" onclick="setLogLevel(null)"${logLevel?'':' disabled'}>all</button>
+      <button class="act" onclick="setLogLevel('WARNING')"${logLevel==='WARNING'?' disabled':''}>warnings</button>
+      <button class="act" onclick="copyLog()">copy</button>
+    </div>
+    <div class="logwrap" id="logwrap">${body}</div>
+    <span class="stat">Refreshes every 5s while this tab is open. Handy when reporting an
+    issue: "copy" puts the visible lines on your clipboard.</span>`;
+  const w=$('#logwrap'); if(w)w.scrollTop=w.scrollHeight;
+  clearTimeout(logTimer);
+  logTimer=setTimeout(()=>{if(tab==='log')renderLog()},5000);
+}
+function setLogLevel(l){logLevel=l;renderLog()}
+async function copyLog(){
+  const t=[...document.querySelectorAll('#logwrap .logline')].map(e=>e.textContent).join('\n');
+  try{await navigator.clipboard.writeText(t);toast('log copied')}
+  catch(e){toast('copy failed — select the text manually')}
+}
+
+async function renderBackupList(){
+  let r; try{ r=await j('api/backups'); }catch(e){ return }
+  const el=document.getElementById('bklist'); if(!el)return;
+  const b=r.backups||[];
+  el.innerHTML = b.length
+    ? `<table><tr><th>saved backup</th><th>size</th><th></th></tr>` + b.map(x=>{
+        const d=new Date(x.ts*1000).toLocaleString(undefined,{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+        const mb=(x.size/1048576).toFixed(1);
+        return `<tr><td>${d}</td><td>${mb} MB</td><td><a class="ghost" href="api/backups/${encodeURIComponent(x.name)}" download="${esc(x.name)}">download</a></td></tr>`;
+      }).join('') + `</table><span class="stat">stored in ${esc(r.dir)} — kept according to "backups to keep"</span>`
+    : '<span class="stat">no saved backups yet — "backup now" or the daily auto-backup creates them</span>';
+}
+
+let anTimer=null;
+async function renderAnalysis(){
+  let st; try{ st=await j('api/analysis'); }catch(e){ return }
+  const el=document.getElementById('anbox'); if(!el)return;
+  if(st.running){
+    const pct = st.total ? Math.round(100*st.processed/st.total) : 0;
+    el.innerHTML=`<span class="stat">measuring… ${st.processed}/${st.total||'?'} events (${pct}%) — leave-one-out runs first, then real events</span>`;
+    clearTimeout(anTimer); anTimer=setTimeout(renderAnalysis,2000); return;
+  }
+  const r=st.result;
+  if(!r){ el.innerHTML='<span class="stat">not measured yet — the run takes a few minutes, mostly for the event probe</span>'; return }
+  if(r.error){ el.innerHTML=`<span class="stat" style="color:var(--bad)">${esc(r.error)}</span>`; return }
+  const l=r.leave_one_out, p=r.probe;
+  const rate = l.n ? Math.round(100*l.hit/l.n) : 0;
+  // Die eigentliche Entscheidungshilfe: wie weit ist die Schwelle vom hoechsten
+  // je gemessenen Fremdtreffer entfernt?
+  const room = r.headroom;
+  const verdict = l.wrong > 0
+    ? `<b style="color:var(--bad)">${l.wrong} misassignment(s)</b> — do not lower the threshold, raise it or clean up the gallery.`
+    : room >= 0.08
+      ? `No wrong matches, and strangers stayed <b>${r.headroom}</b> below your threshold. There is room to lower it — try steps of 0.05 and measure again.`
+      : `No wrong matches, but only <b>${r.headroom}</b> between your threshold and the highest stranger. Leave it where it is.`;
+  el.innerHTML=`
+    <table>
+      <tr><th>leave-one-out (${l.n} reference photos)</th><th></th></tr>
+      <tr><td>recognised correctly</td><td>${l.hit} (${rate}%)</td></tr>
+      <tr><td>wrong person</td><td${l.wrong?' class="u"':''}>${l.wrong}</td></tr>
+      <tr><td>not recognised</td><td>${l.miss}</td></tr>
+      <tr><td>highest a stranger reached</td><td>${r.stranger_ceiling}</td></tr>
+      <tr><td>your threshold</td><td>${r.threshold} · averaged over ${r.top_k} photo(s)</td></tr>
+    </table>
+    <div class="stat" style="margin:8px 0 12px">${verdict}</div>
+    ${p ? `<table>
+      <tr><th>real events, last ${r.days}d</th><th>hits</th><th>median</th><th>weakest</th><th>close to the line</th></tr>
+      ${p.per_person.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.hits}</td><td>${x.median}</td><td>${x.min}</td><td${x.tight?' class="u"':''}>${x.tight}</td></tr>`).join('')||'<tr><td colspan="5">no recognitions in that window</td></tr>'}
+    </table>
+    <span class="stat">${p.events} events, ${p.faces} with a usable face${p.selfhits?`, ${p.selfhits} skipped (already in the gallery — they would score ~1.0 and measure nothing)`:''}</span>` : ''}`;
+}
+async function runAnalysis(){
+  const d=document.getElementById('andays');
+  try{ await j('api/analysis',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({days:+(d?d.value:3)})}); }
+  catch(e){ return toast('already running') }
+  toast('analysis started'); renderAnalysis();
+}
+
+async function renderSettings(){
+  if(tab!=='settings')return;
+  const cfg=await j('api/settings');
+  if(tab!=='settings')return;
+  const labels={match_threshold:'Recognized at / above',unknown_threshold:'Definitely unknown below',
+    suggest_threshold:'Group as "looks like" from',cluster_eps:'Cluster grouping distance',
+    ignore_threshold:'Counts as ignored from'};
+  const hints={match_threshold:'higher = fewer false matches, but more real people land in review',
+    unknown_threshold:'below this a face is treated as a clear stranger',
+    suggest_threshold:'keep below the recognition threshold so borderline faces get pre-sorted',
+    cluster_eps:'higher merges more faces per cluster; lower splits them apart',
+    ignore_threshold:'similarity to an ignore anchor needed to stay silent'};
+  const rows=Object.entries(cfg.thresholds).map(([k,v])=>{
+    const [lo,hi]=cfg.ranges[k];
+    return `<div style="margin:10px 0">
+      <label style="display:flex;gap:10px;align-items:center">
+        <b style="min-width:230px;font:600 13px var(--sans)">${labels[k]||k}</b>
+        <input type="range" id="set-${k}" min="${lo}" max="${hi}" step="0.01" value="${v}"
+          oninput="document.getElementById('setv-${k}').textContent=(+this.value).toFixed(2)" style="flex:1">
+        <span id="setv-${k}" style="font:13px var(--mono);color:var(--acc);min-width:38px">${v.toFixed(2)}</span>
+      </label>
+      <div class="stat" style="margin-left:240px">${hints[k]||''}</div>
+    </div>`;}).join('');
+  const b=cfg.backup;
+  main.innerHTML=`
+    <h2>Matching thresholds</h2>
+    ${rows}
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">Max photos per person</b>
+      <input id="set-maxfaces" type="number" min="5" max="100" value="${cfg.max_faces_per_person}" style="width:70px">
+      <span class="stat">when a person exceeds this, the photo most similar to the rest is set aside (kept diverse angles). Lowering it trims everyone now.</span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">Photos averaged per match</b>
+      <input id="set-topk" type="number" min="1" max="10" value="${cfg.match_top_k}" style="width:70px">
+      <span class="stat">a match score is the mean of this many best-fitting reference photos. Higher resists a single lucky photo, but punishes people whose photos cover many different angles — their score gets dragged down by the less similar ones. Measure with scripts/measure-recognition.py before changing.</span>
+    </div>
+    <h2 style="margin-top:22px">Detection</h2>
+    <div class="stat" style="margin:-4px 0 6px">What counts as a usable face at all — before any matching happens.</div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">Smallest face to recognise</b>
+      <input id="set-minface" type="number" min="16" max="200" value="${cfg.min_face_px}" style="width:70px"><span class="stat">px</span>
+      <span class="stat">if the LOG tab keeps saying "largest face NNpx &lt; min_face_px", this is the limit it means. Below roughly 40 px ArcFace embeddings get unreliable — lowering it buys attempts, not accuracy.</span>
+    </div>
+    <div class="row" style="margin-top:6px;${cfg.input_mode==='folder'?'display:none':''}">
+      <b style="min-width:230px;font:600 13px var(--sans)">Recognition attempts per event</b>
+      <input id="set-attempts" type="number" min="1" max="20" value="${cfg.max_attempts}" style="width:70px">
+      <span class="stat">FaceID retries while an event is running, so more attempts mean more chances to catch the moment the face is largest. Costs a little CPU per event.</span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">Max auto-learned ignore anchors</b>
+      <input id="set-igncap" type="number" min="0" max="200" value="${cfg.max_ignore_anchors}" style="width:70px">
+      <span class="stat">per ignore group; 0 = unlimited. When exceeded, the most redundant <em>auto-learned</em> anchor is dropped — manually added ones are never touched. Deleting by age instead would let ignored people resurface, which is the opposite of what the list is for.</span>
+    </div>
+    ${cfg.input_mode==='folder'?`<h2 style="margin-top:22px">Recording folder</h2>
+    <div class="stat">Watching <code>${esc(cfg.folder.path)}</code> as <b>${esc(cfg.folder.camera)}</b>. ${cfg.folder.processed} files processed${cfg.folder.scanning?' · scan in progress':''}${cfg.folder.last_error?' · '+esc(cfg.folder.last_error):''}.</div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">Remember at most</b>
+      <input id="set-idxcap" type="number" min="0" max="200000" step="500" value="${cfg.folder_max_indexed_files}" style="width:90px">
+      <span class="stat">processed files; 0 = no limit. FaceID keeps a fingerprint per file so a restart does not re-process the whole folder. That index is rewritten on every file, so its cost grows with everything before it — about 320&nbsp;ms per recording at 50,000 entries. Above the limit the oldest entries are dropped; a dropped file is simply read once more if it is still there. <b>Enrolled faces are not affected</b> — those live in the gallery and never expire. Keep this above the number of files the folder actually holds, otherwise every scan re-reads whatever fell out — the log warns when that happens. Currently holding ${cfg.folder.indexed} of ${cfg.folder.index_cap||'∞'}.</span>
+    </div>`:''}
+    <div style="${cfg.input_mode==='folder'?'display:none':''}">
+    <h2 style="margin-top:22px">When a snapshot has no face</h2>
+    <div class="stat" style="margin:-4px 0 6px">Frigate picks its snapshot by highest <em>person</em> score, which is not the same as "face visible" — on most setups only about a fifth of snapshots hold a usable face. These are the ways back in. <a href="https://github.com/SkyTechNerds/faceid/blob/main/docs/recognition-pipeline.md" target="_blank" rel="noopener" style="color:var(--acc)">How it works ↗</a></div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">Sharper reference photos</b>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="set-hires" ${cfg.hires_enroll?'checked':''}> use recordings</label>
+      <span class="stat">Frigate detects on a downscaled stream but records in full resolution. When enabled, new review-queue faces are re-fetched from the recording — typically twice the face size, so much better references. Slightly slower, live recognition is unaffected.</span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">Search the recording</b>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="set-clipfallback" ${cfg.clip_fallback?'checked':''}> when the snapshot has no face</label>
+      <span class="stat">Frigate picks its snapshot by highest <em>person</em> score, which is not the same as "face visible" — often that is the moment someone turns away. Measured over 7 days of real events, only 21% of snapshots held a usable face; of the rest, the recording had one in 9 out of 12. Runs once at the end of an event and only when the snapshot found nothing, so it costs a few seconds of CPU exactly where there was no result anyway.</span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">…only these cameras</b>
+      <input id="set-clipcams" type="text" value="${(cfg.clip_fallback_cameras||[]).join(', ')}" placeholder="empty = all cameras" style="width:260px">
+      <span class="stat">The gain depends almost entirely on the viewing angle. At a front door at head height the recording rescued 4 of 4 events; on a high-mounted indoor camera and a zoomed garden view it rescued none — people never look towards those lenses, so the clip holds no face either and the scan burns CPU for nothing. Run <code>scripts/why-no-face.py --clip 12</code>, or the analysis above, to see which of your cameras are worth it.${(cfg.known_cameras||[]).length?' Known: '+cfg.known_cameras.join(', ')+'.':''}</span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">Live hi-res retry</b>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="set-livehires" ${cfg.live_hires_fallback?'checked':''}> ask go2rtc for a full-resolution frame</label>
+      <span class="stat">For automations that must react <em>while</em> someone is at the door. Searching the recording only works once an event has ended, and a recorded moment is not retrievable for about 45s — too late to greet anyone. go2rtc serves the main stream instead, in roughly a second. Requires go2rtc reachable on port 1984 (it ships with Frigate, but is not always exposed) — the startup log says whether it answers here. Runs once per event, only when the snapshot found nothing.</span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">…when</b>
+      <select id="set-livemode">
+        <option value="fallback" ${cfg.live_hires_mode!=='always'?'selected':''}>only when the snapshot found nothing</option>
+        <option value="always" ${cfg.live_hires_mode==='always'?'selected':''}>on every event (Frigate is just the trigger)</option>
+      </select>
+      <span class="stat"><em>on every event</em> scans the full frame before looking at the snapshot, so people Frigate never tracked as their own object — someone partly hidden behind another — can still be recognised. It costs a frame fetch per group and finds nothing extra on most setups: measured over 7 days here, 0 of 15 groups held more faces than Frigate reported events. Measure before switching. Repeated events from one group are collapsed by a short cooldown, and nothing found this way is written to the Frigate event, since which face belongs to it is exactly what the snapshot decides.</span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">…only these cameras</b>
+      <input id="set-livecams" type="text" value="${(cfg.live_hires_fallback_cameras||[]).join(', ')}" placeholder="empty = all cameras" style="width:260px">
+      <span class="stat">Same idea as above: restrict it to cameras where faces actually appear.${(cfg.known_cameras||[]).length?' Known: '+cfg.known_cameras.join(', ')+'.':''}</span>
+    </div>
+    </div>
+    <h2 style="margin-top:22px">Keeping the gallery clean</h2>
+    <div class="stat" style="margin:-4px 0 6px">Bad reference photos do not just fail to help — they actively make people harder to tell apart.</div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">Weak references</b>
+      <button class="ghost" onclick="crossRiskScan()">check gallery now</button>
+      <span class="stat">A photo with little real facial information — a hard profile, a blown-out IR shot, a steeply tilted head — produces a generic embedding, and generic embeddings resemble each other regardless of who is in them. Two checks find those. The first compares each reference with the <b>other people</b> in your gallery. The second compares it with the <b>rest of that person's own photos</b>: a reference that barely resembles the person it belongs to holds nothing worth matching, and it will attract strangers — this catches photos the first check cannot see, because a live face comes far closer than any stored photo does. Both run automatically on new photos and at startup; this button re-checks everything now. Nothing is deleted — matches move to the person's set-aside pile with the reason, and can be restored from there.</span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <b style="min-width:230px;font:600 13px var(--sans)">Keep set-aside photos</b>
+      <input id="set-trimkeep" type="number" min="0" max="100" value="${cfg.trimmed_keep}" style="width:70px">
+      <span class="stat">how many trimmed photos to keep per person for review/restore (0 = delete immediately). Stops the set-aside pile from growing forever.</span>
+    </div>
+    <div class="row" id="savebar"><button class="act" onclick="saveThresholds()">SAVE SETTINGS</button>
+      <span class="stat">saves every setting on this tab · applies live and persists (overrides config / app options)</span></div>
+
+    <h2>Remove duplicate photos</h2>
+    <div class="row">
+      <b style="min-width:230px;font:600 13px var(--sans)">Duplicate sensitivity</b>
+      <input type="range" id="set-dedupe_threshold" min="0.50" max="0.95" step="0.01" value="${cfg.thresholds.dedupe_threshold}"
+        oninput="document.getElementById('setv-dedupe_threshold').textContent=(+this.value).toFixed(2);dedupePreview()" style="flex:1">
+      <span id="setv-dedupe_threshold" style="font:13px var(--mono);color:var(--acc);min-width:38px">${cfg.thresholds.dedupe_threshold.toFixed(2)}</span>
+    </div>
+    <div class="row">
+      <button class="act" onclick="runDedupe()">REMOVE DUPLICATES (all persons)</button>
+      <span class="stat" id="dedupePrev">sets aside photos similar to one you already have — they add little to recognition. Lower sensitivity = removes more. Camera crops score lower than phone photos, so try ~0.60–0.70. Restorable.</span>
+    </div>
+
+    <h2>Does it actually work?</h2>
+    <div class="row">
+      <button class="act" onclick="runAnalysis()">MEASURE RECOGNITION</button>
+      <label style="display:flex;gap:6px;align-items:center" class="stat">probe the last
+        <select id="andays"><option value="0">— gallery only —</option><option value="1">1 day</option><option value="3" selected>3 days</option><option value="7">7 days</option></select>
+      </label>
+      <span class="stat">tests the gallery against itself (real ground truth) and against recent events. Runs in the background; a few minutes.</span>
+    </div>
+    <div id="anbox" style="margin-bottom:18px"></div>
+    <div class="row">
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="advOn"
+        onchange="setAdvanced(this.checked)"> show the Tools tab</label>
+    </div>
+    <div class="stat" style="max-width:105ch;margin-bottom:18px">Adds a tab with deeper
+      measurements: how fast recognition is, how well each person is covered, and why events
+      yield no usable face. The same analyses as the scripts in the repository, but without a
+      terminal — which is the point, since the scripts are not part of the app image at all.
+      This switch lives in this browser only.</div>
+
+    <h2>Automatic backup</h2>
+    <div class="row">
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="bkEnabled" ${b.enabled?'checked':''}> daily backup</label>
+      <label style="display:flex;gap:6px;align-items:center">at hour <input id="bkHour" type="number" min="0" max="23" value="${b.hour}" size="2" style="width:52px"></label>
+      <label style="display:flex;gap:6px;align-items:center">keep <input id="bkKeep" type="number" min="1" max="90" value="${b.keep}" size="2" style="width:60px"></label>
+      <label style="display:flex;gap:6px;align-items:center">folder <input id="bkDir" value="${esc(b.dir)}" placeholder="(data/backups)" size="20"></label>
+      <button class="act" onclick="saveBackupCfg()">SAVE</button>
+    </div>
+    <div class="stat" style="margin-bottom:8px">runs inside FaceID — no external cron needed. Empty folder = <code>data/backups</code> (survives app updates).</div>
+    <div id="bklist" style="margin-bottom:16px"><span class="stat">loading saved backups…</span></div>
+
+    <h2>Manual backup &amp; restore</h2>
+    <div class="row">
+      <a class="act" href="api/backup" download="faceid-backup.tar.gz" title="download persons + ignore anchors as .tar.gz">DOWNLOAD BACKUP</a>
+      <button class="ghost" onclick="backupNow()" title="write a backup into the auto-backup folder now">save to folder now</button>
+      <label class="ghost" style="cursor:pointer" title="REPLACES all current persons + ignore anchors">Restore (replace)
+        <input type="file" accept=".gz,.tar.gz,application/gzip" style="display:none" onchange="restore(this,false)"></label>
+      <label class="ghost" style="cursor:pointer" title="only ADDS what is missing locally, keeps existing">Restore (merge)
+        <input type="file" accept=".gz,.tar.gz,application/gzip" style="display:none" onchange="restore(this,true)"></label>
+    </div>
+    <div class="stat">Backup contains only your gallery (persons + ignore anchors) — not the unknown queue.</div>`;
+  groupSettings();
+  dedupePreview();
+  renderBackupList();
+  renderAnalysis();
+  const adv=document.getElementById('advOn'); if(adv)adv.checked=advanced();
+}
+
+// Die Einstellungen sind ueber die Zeit auf acht Abschnitte gewachsen — als eine lange
+// Spalte findet man darin nichts mehr. Statt das Markup umzubauen (und jede kuenftige
+// Aenderung an zwei Stellen pflegen zu muessen), werden die <h2>-Abschnitte hier nach
+// dem Rendern zu Unter-Reitern gebuendelt. Versteckt wird per display:none, nicht durch
+// Entfernen — dedupePreview(), renderBackupList() und renderAnalysis() greifen ihre
+// Elemente per ID und brauchen sie im DOM.
+const SETTINGS_TABS=[
+  ['matching','Matching',['Matching thresholds','Detection']],
+  ['fallback','No face?',['When a snapshot has no face']],
+  ['gallery','Gallery',['Keeping the gallery clean','Remove duplicate photos']],
+  ['check','Does it work?',['Does it actually work?']],
+  ['backup','Backup',['Automatic backup','Manual backup & restore']],
+];
+let settingsTab=localStorage.getItem('faceid.settingsTab')||'matching';
+
+function groupSettings(){
+  const kids=[...main.children], groups=[];
+  let cur=null;
+  for(const n of kids){
+    if(n.tagName==='H2'){cur={title:n.textContent.trim(),nodes:[n]};groups.push(cur)}
+    else if(cur)cur.nodes.push(n);
+  }
+  if(groups.length<2)return;
+  const save=document.getElementById('savebar');
+  const nav=document.createElement('nav');
+  nav.style.cssText='margin:0 0 4px;border-bottom:1px solid var(--line)';
+  const sections={};
+  for(const [id,label,titles] of SETTINGS_TABS){
+    const sec=document.createElement('div');
+    sec.dataset.s=id;
+    for(const g of groups){
+      if(!titles.includes(g.title))continue;
+      for(const n of g.nodes){if(n!==save)sec.appendChild(n)}
+    }
+    if(!sec.children.length)continue;
+    sections[id]=sec;
+    const b=document.createElement('button');
+    b.textContent=label; b.dataset.s=id;
+    b.onclick=()=>{settingsTab=id;localStorage.setItem('faceid.settingsTab',id);showSettingsTab(sections,nav)};
+    nav.appendChild(b);
+  }
+  if(!Object.keys(sections).length)return;
+  main.prepend(nav);
+  for(const id in sections)main.appendChild(sections[id]);
+  if(save)main.appendChild(save);          // gilt fuer alles, bleibt immer sichtbar
+  if(!sections[settingsTab])settingsTab=Object.keys(sections)[0];
+  showSettingsTab(sections,nav);
+}
+
+function showSettingsTab(sections,nav){
+  for(const id in sections)sections[id].style.display=id===settingsTab?'':'none';
+  nav.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.s===settingsTab));
+  // SAVE nur zeigen, wo es etwas zu speichern gibt
+  const save=document.getElementById('savebar');
+  if(save)save.style.display=(settingsTab==='matching'||settingsTab==='fallback'||settingsTab==='gallery')?'':'none';
+}
+async function saveThresholds(){
+  const body={};
+  ['match_threshold','unknown_threshold','suggest_threshold','cluster_eps','ignore_threshold'].forEach(k=>{
+    const el=document.getElementById('set-'+k); if(el)body[k]=+el.value;});
+  const mf=document.getElementById('set-maxfaces'); if(mf)body.max_faces_per_person=+mf.value;
+  const topk=document.getElementById('set-topk'); if(topk)body.match_top_k=+topk.value;
+  const ic=document.getElementById('set-igncap'); if(ic)body.max_ignore_anchors=+ic.value;
+  const xc=document.getElementById('set-idxcap'); if(xc)body.folder_max_indexed_files=+xc.value;
+  const mp=document.getElementById('set-minface'); if(mp)body.min_face_px=+mp.value;
+  const at=document.getElementById('set-attempts'); if(at)body.max_attempts=+at.value;
+  const tk=document.getElementById('set-trimkeep'); if(tk)body.trimmed_keep=+tk.value;
+  const dt=document.getElementById('set-dedupe_threshold'); if(dt)body.dedupe_threshold=+dt.value;
+  const hr=document.getElementById('set-hires'); if(hr)body.hires_enroll=hr.checked;
+  const cf=document.getElementById('set-clipfallback'); if(cf)body.clip_fallback=cf.checked;
+  const cc=document.getElementById('set-clipcams'); if(cc)body.clip_fallback_cameras=cc.value.split(',').map(s=>s.trim()).filter(Boolean);
+  const lh=document.getElementById('set-livehires'); if(lh)body.live_hires_fallback=lh.checked;
+  const lc=document.getElementById('set-livecams'); if(lc)body.live_hires_fallback_cameras=lc.value.split(',').map(s=>s.trim()).filter(Boolean);
+  const lm=document.getElementById('set-livemode'); if(lm)body.live_hires_mode=lm.value;
+  const r=await j('api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const extra=(r.deferred&&r.deferred.length)?` — ${r.deferred.join('; ')}`:'';
+  toast((r.trimmed?`Saved — ${r.trimmed} photo(s) trimmed`:'Settings saved')+extra);
+  persons=await j('api/persons');
+}
+let _dedupeTimer=null;
+function dedupePreview(){
+  clearTimeout(_dedupeTimer);
+  _dedupeTimer=setTimeout(async()=>{
+    const el=document.getElementById('set-dedupe_threshold'); if(!el)return;
+    const thr=+el.value;
+    try{
+      const r=await j('api/deduplicate',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({threshold:thr,dry_run:true})});
+      const p=document.getElementById('dedupePrev');
+      if(p){const parts=[];
+        if(r.same_image)parts.push(`${r.same_image} duplicate image(s)`);
+        if(r.similar_face)parts.push(`${r.similar_face} near-identical face(s) at sensitivity ${thr.toFixed(2)}`);
+        p.textContent=parts.length?`would set aside: ${parts.join(' + ')} (restorable).`:`nothing to remove at sensitivity ${thr.toFixed(2)}.`;}
+    }catch(e){}
+  },250);
+}
+async function runDedupe(){
+  const thr=+document.getElementById('set-dedupe_threshold').value;
+  if(!confirm('Scan all persons and set aside near-duplicate photos (sensitivity '+thr.toFixed(2)+')? They stay restorable.'))return;
+  toast('Scanning for duplicates...');
+  const r=await j('api/deduplicate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:thr})});
+  toast(r.moved?`${r.moved} set aside (${r.same_image} duplicate image, ${r.similar_face} similar face)`:'No duplicates found');persons=await j('api/persons');
+}
+async function saveBackupCfg(){
+  const body={backup_enabled:document.getElementById('bkEnabled').checked,
+    backup_hour:+document.getElementById('bkHour').value,
+    backup_keep:+document.getElementById('bkKeep').value,
+    backup_dir:document.getElementById('bkDir').value.trim()};
+  try{
+    await j('api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  }catch(e){toast('Not saved: '+errText(e).slice(0,120));return;}
+  toast('Backup settings saved');
+}
+async function backupNow(){
+  try{const r=await j('api/backup/now',{method:'POST'}); toast('Saved: '+r.file.split('/').pop());}
+  catch(e){toast('Backup failed: '+errText(e).slice(0,120));}
+}
+async function restore(inp,merge){
+  const f=inp.files[0]; if(!f)return;
+  if(!merge&&!confirm('Replace ALL current persons and ignore anchors with this backup? This cannot be undone.')){inp.value='';return;}
+  const fd=new FormData(); fd.append('file',f);
+  toast('Restoring...');
+  try{
+    const r=await j('api/restore?merge='+(merge?'true':'false'),{method:'POST',body:fd});
+    toast('Restored '+r.restored_files+' file(s) ('+r.mode+') - '+r.persons+' persons');
+  }catch(e){toast('Restore failed: '+String(e.message).slice(0,80));}
+  inp.value=''; persons=await j('api/persons'); if(tab==='settings')renderSettings();
+}
+function personCard(slug,p){
+  return `
+    <div class="person" id="p-${slug}">
+      <div class="head">
+        <button class="fav${p.favorite?' on':''}" title="${p.favorite?'remove from favorites':'mark as favorite'}" onclick="toggleFav('${slug}',${p.favorite?0:1})">${p.favorite?'★':'☆'}</button>
+        <b title="click to rename" style="cursor:text" onclick="renamePerson('${slug}',this.textContent)">${esc(p.name)}</b><span class="n">${p.count} faces</span>
+        <span style="flex:1"></span>
+        <label class="ghost" style="cursor:pointer" title="enroll photos (e.g. from your photo library) — faces are extracted automatically">Upload photos
+          <input type="file" multiple accept="image/*" style="display:none" onchange="upload('${slug}',this)">
+        </label>
+        <button class="ghost" style="color:var(--warn);border-color:var(--warn)" title="stop tracking: never notify, match or resurface this person" onclick="ignorePerson('${slug}','${esc(p.name)}')">ignore person</button>
+        <button class="ghost" title="delete this person and all their reference faces permanently" onclick="delPerson('${slug}','${esc(p.name)}')">delete</button>
+      </div>
+      <div class="grid">${p.files.map(f=>`
+        <div class="tile" data-file="${f}"><img src="data/persons/${slug}/${f}" loading="lazy" style="cursor:zoom-in"
+            data-url="data/persons/${esc(slug)}/${esc(f)}" data-cap="${esc(p.name)}" onclick="showFull(this.dataset.url,this.dataset.cap)">
+          <button class="u" title="back to unknown queue" onclick="unassignFace('${slug}','${f}')">↩</button>
+          <button class="x" title="delete permanently" onclick="delFace('${slug}','${f}')">×</button></div>`).join('')}
+      </div>
+      ${(p.trimmed&&p.trimmed.length)?`
+      <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">
+        <span class="trimlabel">✂︎ SET ASIDE · ${p.trimmed.length}</span> <button class="ghost" style="font-size:10px;padding:1px 8px" title="delete all set-aside photos for this person" onclick="clearTrimmed('${slug}','${esc(p.name)}')">clear all</button>
+        <div class="stat">Set aside as duplicates, over the photo limit, <b style="color:var(--warn)">too close to another person</b> (those carry the name they clash with — restoring one makes the two harder to tell apart again), or <b style="color:var(--warn)">not resembling this person at all</b> (⚠ — a photo with almost no face in it, which matches strangers just as well). <b>Hover a photo</b> to mark its closest matches above — <span style="color:var(--acc)">bright green</span> = the photo it duplicates, <span style="color:var(--dim)">grey outline + %</span> = merely its closest matches (same person, different angle — these are kept on purpose). ↩ restore or × delete. <a href="https://github.com/SkyTechNerds/faceid/blob/main/docs/trimming.md" target="_blank" rel="noopener" style="color:var(--acc)">Learn more ↗</a></div>
+        <div class="grid trimgrid" style="margin-top:6px">${p.trimmed.map(t=>`
+          <div class="tile${(t.kind==='cross'||t.kind==='outlier')?' crossrisk':''}" onmouseenter="hiliteSimilar('${slug}',${JSON.stringify(t.similar||[]).replace(/"/g,'&quot;')})" onmouseleave="hiliteSimilar('${slug}',[])">${t.kind==='cross'?`<span class="crosstag" title="${esc(t.reason)}">↔ ${esc(t.partner||'')}</span>`:t.kind==='outlier'?`<span class="crosstag" title="${esc(t.reason)}">⚠ doesn't fit</span>`:''}<img src="data/persons/${slug}/_trimmed/${t.file}" loading="lazy" title="${t.kind==='same_image'?'Same image as the photo highlighted above.':t.kind==='near_dup'?'Near-duplicate of the photo highlighted above.':t.kind==='cross'?esc(t.reason)+' — restoring it makes those two harder to tell apart again.':t.kind==='outlier'?esc(t.reason)+' — restoring it puts back a photo that matches other people as readily as this one.':'Set aside because of the photo limit — highlighted above are its closest matches with their similarity. They are the same person from other angles, not duplicates.'} · ${fmtTs(t.ts)}">
+            <button class="u" title="restore this photo" onclick="restoreTrimmed('${slug}','${t.file}')">↩</button>
+            <button class="x" title="delete permanently" onclick="deleteTrimmed('${slug}','${t.file}')">×</button></div>`).join('')}
+        </div>
+      </div>`:''}
+    </div>`;
+}
+async function renderPersons(){
+  if(tab!=='persons')return;
+  const entries=Object.entries(persons)
+    .sort((a,b)=>a[1].name.localeCompare(b[1].name,undefined,{sensitivity:'base'}));
+  const favs=entries.filter(([,p])=>p.favorite);
+  const rest=entries.filter(([,p])=>!p.favorite);
+  let body='';
+  if(favs.length) body+=`<h2>★ Favorites (${favs.length})</h2>`+favs.map(([s,p])=>personCard(s,p)).join('');
+  if(rest.length) body+=`<h2>${favs.length?'Others':'Persons'} (${rest.length})</h2>`+rest.map(([s,p])=>personCard(s,p)).join('');
+  if(!entries.length) body='<div class="empty">No persons yet.</div>';
+  const jump=entries.length>3?`
+      <select id="pjump" title="jump to a person" onchange="if(this.value){document.getElementById('p-'+this.value).scrollIntoView({behavior:'smooth',block:'start'});this.value='';}">
+        <option value="">Jump to…</option>${personOptions('')}
+      </select>`:'';
+  main.innerHTML=`
+    <div class="row">
+      <input id="pname" placeholder="New person…" size="18" title="create an empty person, then upload photos or assign faces from the unknown queue">
+      <button class="act" onclick="createPerson()">CREATE</button>
+      <span style="flex:1"></span>${jump}
+    </div>`+body;
+}
+async function clearTrimmed(slug,name){
+  if(!confirm('Delete all set-aside photos of "'+name+'"? Your active reference photos stay.'))return;
+  const r=await j('api/persons/'+slug+'/trimmed/clear',{method:'POST'});
+  toast(r.cleared+' set-aside photo(s) deleted');persons=await j('api/persons');if(tab==='persons')renderPersons();
+}
+async function restoreTrimmed(slug,file){
+  await j(`api/persons/${slug}/trimmed/${file}/restore`,{method:'POST'});
+  toast('Photo restored');persons=await j('api/persons');if(tab==='persons')renderPersons();
+}
+async function deleteTrimmed(slug,file){
+  await j(`api/persons/${slug}/trimmed/${file}`,{method:'DELETE'});
+  persons=await j('api/persons');if(tab==='persons')renderPersons();
+}
+async function crossRiskScan(){
+  if(!confirm('Check every reference photo twice — against the other people in your gallery, and against the rest of that person\'s own photos?\n\nA photo too similar to someone else makes the two confusable. A photo that barely resembles its own person holds almost no face information, and those attract strangers.\n\nBoth kinds move to the person\'s set-aside pile with the reason, and can be restored.'))return;
+  try{
+    const r=await j('api/gallery/quality-scan',{method:'POST'});
+    if(!r.removed.length){toast('every reference photo passed both checks');return}
+    const lines=r.removed.map(x=>x.kind==='outlier'
+      ?`${x.person}: ${x.file.slice(0,20)} — ${x.mean_sim} to its own person, ${x.median} is normal`
+      :`${x.person}: ${x.file.slice(0,20)} — ${x.similarity} to ${x.partner}`);
+    alert(`${r.removed.length} reference(s) set aside:\n\n`+lines.join('\n')+
+          '\n\nThey are in each person\'s set-aside pile and can be restored.');
+    render();
+  }catch(e){toast(String(e.message||e).slice(0,140))}
+}
+async function renamePerson(slug,current){
+  const name=prompt('Rename person',current);
+  if(name===null)return;                       // abgebrochen
+  if(!name.trim()||name.trim()===current)return;
+  try{
+    const r=await j(`api/persons/${slug}/rename`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim()})});
+    toast(`renamed to ${r.name}`);render();
+  }catch(e){toast(String(e.message||e).slice(0,140))}
+}
+async function toggleFav(slug,fav){
+  await j(`api/persons/${slug}/favorite`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({favorite:!!fav})});
+  persons=await j('api/persons');
+  if(tab==='persons')renderPersons();
+}
+async function createPerson(){const n=$('#pname').value.trim();if(!n)return;
+  await j('api/persons',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
+  toast(`Created "${n}"`);render()}
+async function upload(slug,inp){
+  const fd=new FormData();[...inp.files].forEach(f=>fd.append('files',f));
+  toast(`Processing ${inp.files.length} photo(s)…`);
+  const r=await j(`api/persons/${slug}/photos`,{method:'POST',body:fd});
+  toast(`${r.added} enrolled${r.skipped.length?`, ${r.skipped.length} skipped`:''}`);render()}
+async function delFace(slug,f){await j(`api/persons/${slug}/faces/${f}`,{method:'DELETE'});render()}
+async function unassignFace(slug,f){await j(`api/persons/${slug}/faces/${f}/unassign`,{method:'POST'});
+  toast('Face moved back to the unknown queue');render()}
+async function ignorePerson(slug,name){
+  if(!confirm(`Stop tracking "${name}"? All their faces become ignore anchors — they will never be notified, matched or shown again. (Reversible via the Ignored section.)`))return;
+  const r=await j(`api/persons/${slug}/ignore`,{method:'POST'});
+  toast(`"${name}" ignored (${r.ignored_faces} anchor faces)`);render();
+}
+async function delPerson(slug,name){if(!confirm(`Delete "${name}" and all their faces?`))return;
+  await j(`api/persons/${slug}`,{method:'DELETE'});render()}
+
+
+// ---- TOOLS -----------------------------------------------------------------
+// Die Auswertungen laufen im Dienst, nicht im Browser: sie brauchen die Galerie,
+// die Erkennung und teils Frigate. Hier steht nur die Darstellung.
+const ADV='faceid.advanced';
+function advanced(){return localStorage.getItem(ADV)==='1'}
+function applyAdvanced(){
+  const b=document.querySelector('nav button[data-t="tools"]');
+  if(b)b.hidden=!advanced();
+  // Wer den Modus abschaltet, waehrend er im Tab steht, saesse sonst auf einer
+  // Seite, die es laut Navigation nicht mehr gibt.
+  if(!advanced()&&tab==='tools')document.querySelector('nav button[data-t="unknowns"]').click();
+}
+function setAdvanced(on){
+  localStorage.setItem(ADV,on?'1':'0');applyAdvanced();
+  toast(on?'Tools tab enabled':'Tools tab hidden');
+}
+
+function tbl(cols,rows){
+  if(!rows.length)return '';
+  return `<table class="t"><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr>`+
+    rows.map(r=>`<tr>${cols.map(c=>`<td>${c[1](r)??'—'}</td>`).join('')}</tr>`).join('')+
+    '</table>';
+}
+const secs=v=>v==null?'—':`${v.toFixed?v.toFixed(1):v}s`;
+
+function fmtDelay(d){
+  if(d.error)return `<span class="stat">${esc(d.error)}</span>`;
+  if(!d.n)return `<span class="stat">${esc(d.note||'nothing recorded yet')}</span>`;
+  let h=`<p class="stat" style="max-width:105ch"><b>${d.n}</b> recognitions ·
+    median <b>${secs(d.median)}</b> · fastest ${secs(d.min)} · 9 of 10 within
+    ${secs(d.p90)}${d.skipped_late?` · ${d.skipped_late} ignored as history-scan results`:''}</p>`;
+  h+=tbl([['attempt',r=>r.attempt],['n',r=>r.n],['median',r=>secs(r.median)],
+          ['fastest',r=>secs(r.min)],['slowest',r=>secs(r.max)]],d.by_attempt||[]);
+  h+=`<p class="stat">Attempt 1 is not FaceID's speed — it is how long Frigate takes to
+     produce a usable snapshot. That is the floor everything else sits on.</p>`;
+  h+=tbl([['camera',r=>esc(r.camera)],['n',r=>r.n],['median',r=>secs(r.median)]],d.by_camera||[]);
+  if((d.by_day||[]).length>1)
+    h+=tbl([['day',r=>esc(r.day)],['n',r=>r.n],['median',r=>secs(r.median)]],d.by_day);
+  return h;
+}
+
+function fmtCoverage(d){
+  if(d.error)return `<span class="stat">${esc(d.error)}</span>`;
+  let h='';
+  if((d.ir_cameras||[]).length)
+    h+=`<p class="stat">cameras that switch to infrared at night:
+        ${d.ir_cameras.map(esc).join(', ')}</p>`;
+  h+=tbl([['person',r=>esc(r.name)],['photos',r=>r.photos],
+          ['alike',r=>r.diversity==null?'—':r.diversity.toFixed(2)],
+          ['frontal',r=>r.frontal],['half',r=>r.half],['profile',r=>r.profile],
+          ['grey',r=>r.greyscale],['self test',r=>r.self_test+'%'],
+          ['cameras',r=>r.cameras.map(c=>esc(c.camera)+' '+c.n).join(', ')||'—']],
+         d.people||[]);
+  h+=`<p class="stat" style="max-width:105ch">The self test is deliberately harsh and
+     pessimistic on small galleries — one photo has to hold up against all the others.
+     A low value means the photos support each other weakly, not that the person will
+     not be recognised.</p>`;
+  if((d.advice||[]).length)
+    h+='<p class="stat">What is concretely missing (weakest first):</p><ul class="stat">'+
+       d.advice.map(a=>`<li><b>${esc(a.name)}</b>: ${a.missing.map(esc).join(', ')}</li>`).join('')+
+       '</ul>';
+  else h+='<p class="stat">Every person is broadly covered.</p>';
+  return h;
+}
+
+function fmtWhy(d){
+  if(d.error)return `<span class="stat">${esc(d.error)}</span>`;
+  const r=d.reasons||{}, tot=d.events||0;
+  const pct=n=>tot?` (${Math.round(100*n/tot)}%)`:'';
+  let h=`<p class="stat" style="max-width:105ch"><b>${tot}</b> events ·
+    usable face <b>${r.ok||0}</b>${pct(r.ok||0)} · no face at all ${r['no face']||0}
+    · too small ${r['too small']||0} · detector unsure ${r.uncertain||0}
+    ${r['no snapshot']?`· no snapshot ${r['no snapshot']}`:''}</p>`;
+  if(d.face_width&&d.face_width.n)
+    h+=`<p class="stat">widest face per event: median ${d.face_width.median}px,
+        threshold is ${d.min_face_px}px</p>`;
+  h+=tbl([['camera',r=>esc(r.camera)+(r.used?'':' <span class="stat">(not processed)</span>')],
+          ['events',r=>r.events],['ok',r=>r.ok],
+          ['no face',r=>r.no_face],['too small',r=>r.too_small],
+          ['unsure',r=>r.uncertain]],d.cameras||[]);
+  h+=`<p class="stat" style="max-width:105ch">Cameras FaceID does not process are measured
+     too — that is the point: it shows whether adding one would be worth it, or whether an
+     existing one only ever delivers backs of heads.</p>`;
+  return h;
+}
+const TOOL_FMT={'delay':fmtDelay,'coverage':fmtCoverage,'why-no-face':fmtWhy};
+
+function toolCard(t,st){
+  const days=(t.days||[]).length?`<label class="stat" style="display:flex;gap:6px;align-items:center">
+      ${esc(t.days_label||'period')}
+      <select id="td-${t.id}">${t.days.map(d=>`<option value="${d}"${d===(t.days[1]??t.days[0])?' selected':''}>${d?d+' day'+(d>1?'s':''):'everything'}</option>`).join('')}</select>
+    </label>`:'';
+  return `<h2>${esc(t.label)}</h2>
+    <div class="row">
+      <button class="act" onclick="runTool('${t.id}')" ${st&&st.running?'disabled':''}>RUN</button>
+      ${days}
+      <span class="stat" style="max-width:70ch">${esc(t.about)}</span>
+    </div>
+    <div id="tb-${t.id}" style="margin-bottom:18px"></div>`;
+}
+
+async function renderTools(){
+  main.innerHTML='<span class="stat">loading…</span>';
+  let d; try{ d=await j('api/tools') }catch(e){ main.innerHTML='<span class="stat">tools unavailable</span>'; return }
+  if(tab!=='tools')return;
+  main.innerHTML=`<p class="stat" style="max-width:105ch">Measurements that used to live
+    in <code>scripts/</code> and needed a terminal. They read what FaceID already has —
+    nothing here changes your gallery.</p>`+
+    d.tools.map(t=>toolCard(t,d.state[t.id])).join('');
+  for(const t of d.tools)paintTool(t.id,d.state[t.id]);
+}
+
+function paintTool(id,st){
+  const el=document.getElementById('tb-'+id); if(!el||!st)return;
+  if(st.running){
+    const pct=st.total?Math.round(100*st.processed/st.total):0;
+    el.innerHTML=`<span class="stat">measuring… ${st.processed}/${st.total||'?'}${st.total?` (${pct}%)`:''}</span>`;
+    setTimeout(()=>pollTool(id),1000);
+  } else if(st.result){
+    el.innerHTML=(TOOL_FMT[id]||(r=>`<pre class="stat">${esc(JSON.stringify(r,null,2))}</pre>`))(st.result);
+    const b=el.parentElement&&document.querySelector(`button[onclick="runTool('${id}')"]`);
+    if(b)b.disabled=false;
+  }
+}
+
+async function pollTool(id){
+  if(tab!=='tools')return;
+  try{ paintTool(id,await j('api/tools/'+id)) }catch(e){}
+}
+
+async function runTool(id){
+  const sel=document.getElementById('td-'+id);
+  try{ await j('api/tools/'+id,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({days:+(sel?sel.value:0)})}) }
+  catch(e){ return toast('already running') }
+  const b=document.querySelector(`button[onclick="runTool('${id}')"]`); if(b)b.disabled=true;
+  const el=document.getElementById('tb-'+id); if(el)el.innerHTML='<span class="stat">starting…</span>';
+  pollTool(id);
+}
+
+applyAdvanced();
+
+health();setInterval(health,10000);render();
+</script>
+</body>
+</html>
