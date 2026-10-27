@@ -6,9 +6,9 @@ one that feels obvious.
 
 ← back to the [README](../README.md)
 
-## Without a terminal: the Tools tab
+## Without a terminal: the Checks page
 
-Switch it on under **Settings → *Does it actually work?* → show the Tools tab**. It runs the same
+**Checks** in the header (since 0.27; before that an opt-in Tools tab). It runs the same
 analyses in the service itself and shows them as tables:
 
 | Tool | Answers | Cost |
@@ -50,7 +50,7 @@ recognises anyone" reports turn out not to be gallery problems at all.
 landmarks, which cameras she was enrolled from, greyscale/IR shots, and a leave-one-out
 self test — then names the concrete gap.
 
-`measure-delay.py` is the one the Tools tab has superseded: it derives the
+`measure-delay.py` is the one the Checks page has superseded: it derives the
 same delay figures from `journalctl`, so it only runs on a systemd host and only as far back
 as the log is kept. The tab reads the history instead, which is why its numbers are
 available in the app and survive log rotation.
@@ -61,14 +61,13 @@ including how much headroom each recognition has above the threshold. Events who
 is already in the gallery are excluded — they score ~1.0 and measure nothing.
 
 **Running FaceID as a Home Assistant app?** You have no shell, so the part that decides
-your threshold was moved into the UI: Settings → *Does it actually work?* runs the
+your threshold was moved into the UI: **Checks → *Does it recognise the right people?*** runs the
 leave-one-out test and the practical probe as a background job and reports the one number
 that matters, how high a stranger got. That covers threshold and `match_top_k`.
 
-So every script has a home in the UI, but not all in the same place: `why-no-face.py`,
-`coverage.py` and `measure-delay.py` are the three reports in the **Tools tab**, while
-`measure-recognition.py`'s equivalent is the background job under **Settings → *Does it
-actually work?*** described just above.
+So every script has a home in the UI, all on the **Checks** page: `measure-recognition.py`'s
+equivalent is the first section, described just above, and `why-no-face.py`, `coverage.py` and
+`measure-delay.py` are the three reports below it.
 
 What none of them can do from the UI is run against a **different** gallery than the live
 one. That needs a shell, and neither case is required to run FaceID well:

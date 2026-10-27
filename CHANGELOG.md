@@ -11,6 +11,8 @@ update dialog; standalone users can watch GitHub releases.
   the browser's default blue, underlined, at 5.2:1 (light) and 10.1:1 (dark).
 - **Phone header:** below 440 px the wordmark and the light/dark switch give way (the theme
   follows the system there), so the header keeps its icons on one row.
+- **Docs:** README screenshots show the new interface (AI-generated faces, made-up names); the
+  README and `docs/` point to *Checks* and *Log* instead of the old Tools and LOG tabs.
 
 ## 0.27.0 — 2026-10-27
 

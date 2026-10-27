@@ -219,7 +219,7 @@ evidence it hurts.
 
 ## Reading the log
 
-The LOG tab (or `journalctl -u faceid -f`) narrates each stage:
+The **Log** page (or `journalctl -u faceid -f`) narrates each stage:
 
 ```
 event … (entrance): attempt 1, no face detected in snapshot 300x300
