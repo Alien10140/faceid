@@ -65,18 +65,25 @@ opened read-only and never changed.
 
 ## Screenshots
 
-*All faces below are AI-generated (StyleGAN) — no real persons.*
+*All faces below are AI-generated (StyleGAN, via 100k-faces) and the names are made up — no real persons.*
 
-**Unknown review** — new faces arrive auto-clustered; assign a whole cluster with one
-click, or scan your camera history to bootstrap the gallery. A *looks like* guess shows
-that person's gallery reference photo beside the name (hover to enlarge):
+**Sorting** — every waiting face at once, grouped into cards by the person FaceID suggests.
+Pick faces and drop them on a person: tap a pile, press 1–9, drag, or search everyone with
+`P`. Assigning, ignoring and applying suggestions can be undone:
 
-![Unknown review with auto-clustered faces](docs/screenshot-unknowns.png)
+![Sorting: faces grouped by suggested person, people piles on the right](docs/screenshot-unknowns.jpg)
 
-**Persons** — your gallery; upload photos, rename a person by clicking their name, or send
-faces back to review:
+**Full snapshot** — ⛶ on any face shows the whole frame to identify someone, and assigns
+from there:
 
-![Person gallery](docs/screenshot-persons.png)
+![Full snapshot with the people to pick from](docs/screenshot-snapshot.jpg)
+
+**People** — your gallery as list or grid: key image per person, photos newest first,
+set-aside photos with the reason they were taken out of matching:
+
+![People grid with one person opened](docs/screenshot-persons.jpg)
+
+The previous interface stays available at *Settings → Classic interface* for this release.
 
 ## How it works
 
@@ -148,7 +155,7 @@ tools built on the same models (Immich, CompreFace) sit in the same range.
 | 320 | ~60 ms |
 
 Lower values find small and distant faces less reliably, so trade it against the
-*Why do events yield no face?* tool (Tools tab, or `scripts/why-no-face.py`) rather than
+*Why do events yield no face?* check (Checks page, or `scripts/why-no-face.py`) rather than
 by feel.
 
 If ~650 MB is genuinely too much, the only real reduction is a smaller model family
@@ -487,10 +494,10 @@ trades away, how to find yours from your own data, and why strangers are rarely 
 
 ## Seeing what it is doing
 
-The **LOG tab** shows the last 500 log lines straight in the UI — including the quiet
+The **Log** page shows the last 500 log lines straight in the UI — including the quiet
 cases that decide whether a setup works: whether Frigate answers at startup, which
 cameras were announced to Home Assistant, and for every event whether a face was found
-at all. If nothing is ever recognised, that tab usually says why within a few lines.
+at all. If nothing is ever recognised, that page usually says why within a few lines.
 There is a warnings-only filter and a copy button for pasting into an issue.
 
 ## Measuring instead of guessing
@@ -499,7 +506,7 @@ Nothing in this project is tuned by feel. Three reports answer the questions peo
 actually have — *how fast is it?*, *is my gallery good enough?*, *why did that event
 produce no face?* — and they run either in the UI or from a terminal.
 
-**→ [docs/measuring.md](docs/measuring.md)** — the Tools tab, the standalone scripts, and
+**→ [docs/measuring.md](docs/measuring.md)** — the Checks page, the standalone scripts, and
 how to read what they tell you.
 
 ## How training stays healthy

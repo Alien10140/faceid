@@ -14,8 +14,8 @@ probably noticed the name never appears in it. Two measured reasons:
   three days (49 recognitions) the name was ready after a **median of 9.9 seconds** — the
   fastest in 0.5 s, the slowest in 41.7 s.
   What sets the floor is Frigate's time to a first usable snapshot, and that varies a lot —
-  it is not a fixed few seconds. Measure your own in FaceID's **Tools** tab (switch it on
-  under Settings → *Does it actually work?*); the numbers depend on your cameras and your hardware.
+  it is not a fixed few seconds. Measure your own on FaceID's **Checks** page (*How fast is a
+  recognition?*); the numbers depend on your cameras and your hardware.
 - **Waiting can help — but often does not, for a different reason than I first published.**
   ⚠️ An earlier version of this section claimed Frigate never announces the name over MQTT.
   That was wrong: the test behind it ran against an *already finished* event, where nothing

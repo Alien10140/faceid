@@ -6,7 +6,7 @@ people you enrolled — not strangers — are usually the limit.
 ← back to the [README](../README.md)
 
 The defaults are deliberately cautious, and on a real gallery that caution turned out to
-be expensive. Measure yours rather than guessing — the Tools tab produces the numbers
+be expensive. Measure yours rather than guessing — the Checks page produces the numbers
 without a terminal, as do `scripts/measure-recognition.py` and `scripts/coverage.py`.
 
 On a 128-photo household gallery the separation was far wider than the defaults assume:
@@ -32,7 +32,7 @@ Together these lifted recognition on a held-out set of real events from 90% to 1
 moved the weakest favourite's worst match from 0.01 above the cut-off to 0.09 above it —
 without a single misassignment.
 
-**In the UI:** Settings → *Does it actually work?* runs the same analysis as a background
+**In the UI:** Checks → *Does it recognise the right people?* runs the same analysis as a background
 job — no shell needed, which matters if you run FaceID as a Home Assistant app. The
 scripts remain for scripted or comparative runs (`--baseline`, `--top-k`).
 

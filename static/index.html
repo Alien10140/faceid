@@ -180,7 +180,7 @@ main{max-width:1500px;margin:0 auto;padding:22px 24px 120px}
 .pc.open .cover{box-shadow:0 0 0 4px var(--hot)}
 .pcard .nm{font:500 20px/1.15 var(--wide);letter-spacing:-.01em;margin:12px 2px 2px}
 .pcard .mt{font-size:14px;color:var(--ink-2);margin:0 2px}
-.pcard .num{position:absolute;left:10px;top:10px;font:700 15px var(--wide);min-width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:oklch(12% .01 50 / .7);color:#fff}
+.pc .num{position:absolute;z-index:2;pointer-events:none;left:10px;top:10px;font:700 15px var(--wide);min-width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:oklch(12% .01 50 / .7);color:#fff}
 .fav{position:absolute;top:10px;right:10px;width:44px;height:44px;border-radius:12px;border:0;background:oklch(12% .01 50 / .6);color:#fff;font-size:20px;cursor:pointer;z-index:2}
 .fav[aria-pressed="true"]{background:var(--hot);color:var(--hot-ink)}
 .fav:active{transform:scale(.9)}
@@ -409,6 +409,7 @@ dialog::backdrop{background:oklch(12% .01 50 / .72)}
   .savebar .b{width:100%}
   .toast{top:auto;bottom:24px}
 }
+@media (max-width:440px){.brand{font-size:0;gap:0}#themeBtn{display:none}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
 /* ---------- additions for the shipped UI ---------- */
@@ -425,6 +426,8 @@ dialog::backdrop{background:oklch(12% .01 50 / .72)}
 .spin{width:18px;height:18px;border-radius:50%;border:2.5px solid currentColor;border-right-color:transparent;animation:sp .7s linear infinite;display:inline-block;vertical-align:-3px}
 @keyframes sp{to{transform:rotate(360deg)}}
 .err{color:var(--warn);font-weight:600}
+main a:not(.b):not(.classic-link),dialog a:not(.b){color:var(--hot-text);text-decoration:underline;text-underline-offset:2px}
+main a:not(.b):not(.classic-link):hover,dialog a:not(.b):hover{text-decoration-thickness:2px}
 .loading{padding:60px 0;text-align:center;color:var(--ink-2)}
 /* sub navigation (people / ignored, settings sections) */
 .subnav{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 18px}
