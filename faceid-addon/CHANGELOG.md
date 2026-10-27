@@ -33,7 +33,8 @@ update dialog; standalone users can watch GitHub releases.
   FaceID logo; fonts (Unbounded, Albert Sans — SIL OFL) ship in `static/assets`, so the
   interface loads nothing from outside.
 - **The previous interface stays at `/classic`** for this release, as a way back if
-  something you rely on is missing.
+  something you rely on is missing. *Settings* and the shortcuts sheet link to it, and it links
+  back; both links are relative, so they work behind Home Assistant ingress.
 
 ## 0.26.0 — 2026-10-07
 

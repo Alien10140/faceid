@@ -470,6 +470,10 @@ dialog::backdrop{background:oklch(12% .01 50 / .72)}
 .snav button{min-height:44px;text-align:left;padding:0 16px;border-radius:14px;border:0;background:transparent;font-weight:600;font-size:16px;color:var(--ink-2);cursor:pointer}
 .snav button[aria-current="true"]{background:var(--raise);color:var(--ink);box-shadow:var(--shadow)}
 .snav button:active{background:var(--press)}
+.classic-link{display:flex;align-items:center;min-height:44px;padding:0 16px;margin-top:12px;border-top:1px solid var(--line);padding-top:12px;color:var(--ink-2);font-size:15px;font-weight:600;text-decoration:none}
+.classic-link:active{color:var(--ink)}
+@media (hover:hover){.classic-link:hover{color:var(--ink);text-decoration:underline}}
+@media (max-width:860px){.classic-link{border-top:0;margin-top:0;padding-top:0;white-space:nowrap}}
 @media (hover:hover){.snav button:not([aria-current="true"]):hover{background:var(--hover);color:var(--ink)}}
 .sett{display:flex;flex-direction:column;gap:14px}
 .sett h2{font:500 26px var(--wide);margin:0;letter-spacing:-.02em}
@@ -565,7 +569,7 @@ dialog::backdrop{background:oklch(12% .01 50 / .72)}
     <dt><kbd>Esc</kbd></dt><dd>Clear the selection / close a sheet</dd>
     <dt><kbd>Z</kbd></dt><dd>Undo</dd>
   </dl>
-  <div class="foot"><button class="b" onclick="helpDlg.close()">Close</button></div></div></dialog>
+  <div class="foot"><a class="b ghost" href="classic">Classic interface</a><span style="flex:1"></span><button class="b" onclick="helpDlg.close()">Close</button></div></div></dialog>
 <dialog id="lbDlg" class="lbx" aria-label="Full snapshot"><div class="shot" id="lbShot"></div>
   <div class="foot"><span class="crop" id="lbCrop"></span><span id="lbCap"></span><button class="b" onclick="lbDlg.close()">Close <kbd>Esc</kbd></button><span class="lbmove" id="lbMove"></span></div></dialog>
 <dialog id="askDlg" role="alertdialog" aria-labelledby="askT"><form method="dialog" class="dlg">
@@ -1031,7 +1035,8 @@ async function renderSettings(){
       <div class="help">Merge only adds what is missing here. Replace swaps all people and ignored faces for the backup — it cannot be undone.</div></div>`;
   }
   const dirty=Object.keys(draft).length;
-  main.innerHTML=`<div class="ph"><h1>Settings</h1></div><div class="settings"><nav class="snav" aria-label="Settings sections">${SECTIONS.map(([k,l])=>`<button data-st="${k}" aria-current="${setTab===k}">${l}</button>`).join('')}</nav>
+  main.innerHTML=`<div class="ph"><h1>Settings</h1></div><div class="settings"><nav class="snav" aria-label="Settings sections">${SECTIONS.map(([k,l])=>`<button data-st="${k}" aria-current="${setTab===k}">${l}</button>`).join('')}
+    <a class="classic-link" href="classic" data-tip="Previous interface" data-tipsub="kept for this release in case something is missing here">Classic interface ↗</a></nav>
     <section class="sett">${body}${dirty?`<div class="dirty" role="status"><p><b>${dirty} unsaved change${dirty>1?'s':''}</b> — they apply live once saved.</p><button class="b" id="setDiscard">Discard</button><button class="b hot" id="setSave">Save settings</button></div>`:''}</section></div>`;
   if(setTab==='backup')renderBackups();if(setTab==='gallery')dedupePreview();
 }
