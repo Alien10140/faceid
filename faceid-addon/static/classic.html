@@ -16,6 +16,8 @@ body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--sans)}
 header{display:flex;align-items:baseline;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line)}
 header h1{font:700 15px var(--mono);color:var(--acc);letter-spacing:.08em}
 header .stat{font:12px var(--mono);color:var(--dim)}
+header .newui{font:600 13px var(--mono);color:var(--acc);text-decoration:none;padding:10px 4px}
+header .newui:hover{text-decoration:underline}
 table.t{border-collapse:collapse;width:auto;max-width:100%;font-size:12px;margin:2px 0 14px}
 table.t th{text-align:right;color:var(--dim);font-weight:400;padding:3px 10px 3px 0;
   border-bottom:1px solid var(--line)}
@@ -152,6 +154,8 @@ td.p{color:var(--acc)} td.u{color:var(--warn)}
 <header>
   <h1>FACEID</h1>
   <span class="stat" id="health">—</span>
+  <span style="flex:1"></span>
+  <a class="newui" href="./" title="the new interface — this one stays for one release as a fallback">→ new interface</a>
 </header>
 <nav>
   <button data-t="unknowns" class="on" title="review queue: unrecognized faces, grouped by person">UNKNOWN</button>
