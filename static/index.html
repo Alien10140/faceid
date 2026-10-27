@@ -416,7 +416,12 @@ dialog::backdrop{background:oklch(12% .01 50 / .72)}
 .status-dot.off{background:var(--warn);box-shadow:none}
 .hstat{font-size:14px;opacity:.8;white-space:nowrap}
 .scan{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;color:var(--ink-2)}
-.scan select,.sett select,.hist-tools select{min-height:44px;border-radius:999px;border:2px solid var(--edge);background:var(--raise);padding:0 14px;font-size:15px}
+.scan select,.sett select,.hist-tools select,.tool select{-webkit-appearance:none;appearance:none;min-height:44px;border-radius:999px;border:2px solid var(--edge);
+  background:var(--raise) no-repeat right 14px center/16px 16px;padding:0 42px 0 16px;font:500 15px var(--sans);color:var(--ink);cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23716a5f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E")}
+.scan select:active,.sett select:active,.hist-tools select:active,.tool select:active{background-color:var(--press)}
+@media (hover:hover){.scan select:hover,.sett select:hover,.hist-tools select:hover,.tool select:hover{border-color:var(--ink-2)}}
+.scan select:disabled{opacity:.5;cursor:not-allowed}
 .spin{width:18px;height:18px;border-radius:50%;border:2.5px solid currentColor;border-right-color:transparent;animation:sp .7s linear infinite;display:inline-block;vertical-align:-3px}
 @keyframes sp{to{transform:rotate(360deg)}}
 .err{color:var(--warn);font-weight:600}
@@ -1041,10 +1046,10 @@ const TOOL_FMT={
 async function renderChecks(){
   main.innerHTML='<div class="loading"><span class="spin"></span></div>';const d=await api('api/tools').catch(()=>null);if(view!=='checks')return;
   const rec=`<section class="tool"><h3>Does it recognise the right people?</h3><p>Tests the gallery against itself (real ground truth) and against recent events, and tells you whether the recognition threshold has room. Runs in the background for a few minutes; the event probe downloads one snapshot per event.</p>
-    <div class="ctl" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><label for="andays">Also probe real events</label><select id="andays" class="b"><option value="0">gallery only</option><option value="1">last day</option><option value="3" selected>last 3 days</option><option value="7">last 7 days</option></select><button class="b hot" id="anRun">Run</button></div>
+    <div class="ctl" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><label for="andays">Also probe real events</label><select id="andays"><option value="0">gallery only</option><option value="1">last day</option><option value="3" selected>last 3 days</option><option value="7">last 7 days</option></select><button class="b hot" id="anRun">Run</button></div>
     <div class="result" id="anbox" style="margin-top:12px">Loading…</div></section>`;
   main.innerHTML=`<div class="ph"><h1>Checks</h1></div><p class="lead">Measurements of how well FaceID works. They only read what FaceID already has — nothing here changes your gallery or your settings.</p><div class="sett">${rec}${d?d.tools.map(t=>`<section class="tool"><h3>${esc(t.label)}</h3><p>${esc(t.about)}</p>
-    <div class="ctl" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${(t.days||[]).length?`<label for="td-${t.id}">${esc(t.days_label||'Period')}</label><select id="td-${t.id}" class="b">${t.days.map(x=>`<option value="${x}" ${x===(t.days[1]??t.days[0])?'selected':''}>${x?x+' day'+(x>1?'s':''):'everything'}</option>`).join('')}</select>`:''}<button class="b hot" data-tool="${t.id}">Run</button></div>
+    <div class="ctl" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${(t.days||[]).length?`<label for="td-${t.id}">${esc(t.days_label||'Period')}</label><select id="td-${t.id}">${t.days.map(x=>`<option value="${x}" ${x===(t.days[1]??t.days[0])?'selected':''}>${x?x+' day'+(x>1?'s':''):'everything'}</option>`).join('')}</select>`:''}<button class="b hot" data-tool="${t.id}">Run</button></div>
     <div id="tb-${t.id}"></div></section>`).join(''):'<p class="err">The other measurements are unavailable.</p>'}</div>`;
   renderAnalysis();if(d)for(const t of d.tools)paintTool(t.id,d.state[t.id]);
 }
