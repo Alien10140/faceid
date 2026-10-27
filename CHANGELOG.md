@@ -3,6 +3,29 @@
 All notable changes to FaceID. The Home Assistant app shows this file in the
 update dialog; standalone users can watch GitHub releases.
 
+## 0.27.0 — 2026-10-27
+
+- **A new review interface.** Sorting is now a table: every waiting face at once, grouped
+  into cards by the person FaceID thinks it is (*Suggested* above the suggest threshold,
+  *Maybe* below it, *No match yet*). Pick faces and drop them on a person — tap a pile, press
+  1–9, drag with the mouse, or search everyone with `P`. Every face has a ⛶ button for the
+  full snapshot, and the snapshot itself lets you assign straight away. Assigning, ignoring
+  and applying suggestions can be undone; discarding crops and deleting photos commit only
+  after the undo toast is gone.
+- **People, history, log, tools and settings in the same design**, with nothing left out:
+  upload photos, rename, favourites, set-aside photos with their reason, the ignore list,
+  *was wrong* analysis, measurements, backup and restore. Settings are split into five
+  sections and keep unsaved changes in one bar instead of saving field by field.
+- **Key image per person.** `POST /api/persons/{slug}/cover` with `{"file": …}` (or
+  `null`) picks the photo that represents a person everywhere in the interface; it is
+  stored in `meta.json` and travels with backups. Matching is unaffected. If that photo is
+  set aside or deleted, the newest photo takes its place.
+- **Light and dark**, following the system, switchable in the header. Colours follow the
+  FaceID logo; fonts (Unbounded, Albert Sans — SIL OFL) ship in `static/assets`, so the
+  interface loads nothing from outside.
+- **The previous interface stays at `/classic`** for this release, as a way back if
+  something you rely on is missing.
+
 ## 0.26.0 — 2026-10-07
 
 - **Looks-like cues show the gallery face.** Unknown review now stores `guess_top_slug` +

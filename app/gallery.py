@@ -101,13 +101,15 @@ class Gallery:
                     "emb": emb,
                     "files": files,
                     "favorite": bool(meta.get("favorite", False)),
+                    "cover": meta.get("cover") or None,
                     # Herkunft je Foto (Kamera, Ereigniszeit) — fehlt bei Altbestand
                     "sources": dict(meta.get("sources", {})),
                 }
                 if changed:
                     meta_f.write_text(json.dumps(
                         {"name": meta.get("name", pdir.name), "files": files,
-                         "favorite": bool(meta.get("favorite", False))},
+                         "favorite": bool(meta.get("favorite", False)),
+                         "cover": meta.get("cover") or None},
                         ensure_ascii=False, indent=1), encoding="utf-8")
             embs, ids, groups = [], [], []
             for jf in sorted(self.ignored_dir.glob("*.json")):
@@ -283,6 +285,7 @@ class Gallery:
         (pdir / "meta.json").write_text(
             json.dumps({"name": entry["name"], "files": entry["files"],
                         "favorite": bool(entry.get("favorite", False)),
+                        "cover": entry.get("cover") or None,
                         "sources": entry.get("sources", {})},
                        ensure_ascii=False, indent=1),
             encoding="utf-8",
@@ -295,6 +298,9 @@ class Gallery:
             return {
                 slug: {"name": e["name"], "count": len(e["files"]), "files": list(e["files"]),
                        "favorite": bool(e.get("favorite", False)),
+                       # Nur ein noch vorhandenes Foto ist ein Key-Image. Ein beiseitegelegtes
+                       # oder geloeschtes faellt still weg, statt auf ein Loch zu zeigen.
+                       "cover": e.get("cover") if e.get("cover") in e["files"] else None,
                        "trimmed": self.trimmed(slug)}
                 for slug, e in self._cache.items()
             }
@@ -491,6 +497,17 @@ class Gallery:
             if entry is None:
                 return False
             entry["favorite"] = bool(fav)
+            self._persist(slug)
+            return True
+
+    def set_cover(self, slug: str, fname: str | None) -> bool:
+        """Key-Image einer Person setzen (None = zuruecksetzen). Nur Anzeige: das
+        Matching nutzt weiterhin alle Fotos gleich."""
+        with self._lock:
+            entry = self._cache.get(slug)
+            if entry is None or (fname is not None and fname not in entry["files"]):
+                return False
+            entry["cover"] = fname
             self._persist(slug)
             return True
 
