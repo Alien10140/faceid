@@ -3,6 +3,16 @@
 All notable changes to FaceID. The Home Assistant app shows this file in the
 update dialog; standalone users can watch GitHub releases.
 
+## Unreleased
+
+- **Select all on the Sort board no longer rebuilds every tile.** With a few thousand
+  waiting faces, toggling Select all used to `innerHTML` the whole board (and decode
+  hundreds of images again). Selection now updates in place. An expanded card still
+  shows at most 24 crops; Select all covers every face in that pile. Assign and
+  ignore drop those ids from the cached queue immediately; rematch of the rest is
+  the existing background pass, and Frigate `sub_label` posts no longer hold the
+  handler. Contributed by @Alien10140.
+
 ## 0.27.1 — 2026-10-27
 
 - **People grid:** the key number (1–9) sits on the photo again instead of as loose text under

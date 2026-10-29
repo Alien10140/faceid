@@ -75,6 +75,9 @@ class Gallery:
         # Eigenes Lock, nicht self._lock: refresh_guesses ruft match(), und match()
         # nimmt self._lock — unter demselben Lock waere das ein Deadlock.
         self._refresh_run_lock = threading.Lock()
+        self._guesses_epoch = 0
+        self._guesses_refreshing = False
+        self._guesses_updated_ts = 0.0
         self._cache = {}  # slug -> {"name":..., "emb": np.ndarray, "files": [...]}
         self._ign_emb = np.zeros((0, 512), dtype=np.float32)
         self._ign_ids: list[str] = []
@@ -1117,12 +1120,23 @@ class Gallery:
             except (json.JSONDecodeError, OSError):
                 continue
             slug, name, score, top_photo = self.match(np.array(m["embedding"], dtype=np.float32))
-            m["guess"], m["guess_score"] = name, round(float(score), 3)
+            new_score = round(float(score), 3)
+            new_photo = top_photo if slug and top_photo else None
+            new_slug = slug if slug and top_photo else None
+            # Cosine is cheap; rewriting thousands of JSON files with fsync is not.
+            # Skip the replace when the four cue fields the UI actually reads
+            # are already what this pass would persist.
+            if (m.get("guess") == name
+                    and m.get("guess_score") == new_score
+                    and m.get("guess_top_photo") == new_photo
+                    and m.get("guess_top_slug") == new_slug):
+                continue
+            m["guess"], m["guess_score"] = name, new_score
             # Persist slug+file together so the UI does not re-derive the person
             # folder from the display name (rename / duplicate / slugify drift).
-            if slug and top_photo:
-                m["guess_top_photo"] = top_photo
-                m["guess_top_slug"] = slug
+            if new_slug and new_photo:
+                m["guess_top_photo"] = new_photo
+                m["guess_top_slug"] = new_slug
             else:
                 m.pop("guess_top_photo", None)
                 m.pop("guess_top_slug", None)
@@ -1170,6 +1184,10 @@ class Gallery:
                 raise
         if changed:
             self._fsync_unknown_dir()
+        with self._refresh_sched_lock:
+            if changed:
+                self._guesses_epoch += 1
+            self._guesses_updated_ts = time.time()
 
     def _fsync_unknown_dir(self):
         """Einmal je Durchlauf, nicht je Datei: erst damit ist der Namenstausch
@@ -1195,6 +1213,7 @@ class Gallery:
         """
         with self._refresh_sched_lock:
             now = time.time()
+            self._guesses_refreshing = True
             if self._refresh_first_request is None:
                 self._refresh_first_request = now
             # Obergrenze gegen den Dauerstrom: rein nachlaufend wuerde ein Burst
@@ -1208,31 +1227,81 @@ class Gallery:
             t = threading.Thread(target=self._refresh_guesses_worker, name="refresh-guesses",
                                  daemon=True)
             self._refresh_thread = t
-            t.start()
-
-    def _refresh_guesses_worker(self):
-        while True:
-            with self._refresh_sched_lock:
-                deadline = self._refresh_deadline
-            if deadline is None:
-                return
-            wait = deadline - time.time()
-            if wait > 0:
-                time.sleep(wait)
-                continue
-            with self._refresh_sched_lock:
-                if self._refresh_deadline is not None and time.time() < self._refresh_deadline:
-                    continue
+            try:
+                t.start()
+            except Exception:
+                self._refresh_thread = None
                 self._refresh_deadline = None
                 self._refresh_first_request = None
-            try:
-                self.refresh_guesses()
-            except Exception:
-                log.exception("background refresh_guesses failed")
-            with self._refresh_sched_lock:
-                if self._refresh_deadline is None:
-                    self._refresh_thread = None
+                self._guesses_refreshing = False
+                log.exception("failed to start refresh-guesses worker")
+
+    def _refresh_guesses_worker(self):
+        crashed = False
+        try:
+            while True:
+                with self._refresh_sched_lock:
+                    deadline = self._refresh_deadline
+                if deadline is None:
                     return
+                wait = deadline - time.time()
+                if wait > 0:
+                    time.sleep(wait)
+                    continue
+                with self._refresh_sched_lock:
+                    if self._refresh_deadline is not None and time.time() < self._refresh_deadline:
+                        continue
+                    self._refresh_deadline = None
+                    self._refresh_first_request = None
+                try:
+                    self.refresh_guesses()
+                except Exception:
+                    log.exception("background refresh_guesses failed")
+                with self._refresh_sched_lock:
+                    if self._refresh_deadline is None:
+                        return
+        except Exception:
+            crashed = True
+            log.exception("refresh-guesses worker crashed")
+        finally:
+            with self._refresh_sched_lock:
+                if self._refresh_thread is not threading.current_thread():
+                    return
+                self._refresh_thread = None
+                if crashed:
+                    self._refresh_deadline = None
+                    self._refresh_first_request = None
+                    self._guesses_refreshing = False
+                    return
+                if self._refresh_deadline is None:
+                    self._guesses_refreshing = False
+                    return
+                t = threading.Thread(target=self._refresh_guesses_worker,
+                                     name="refresh-guesses", daemon=True)
+                self._refresh_thread = t
+                try:
+                    t.start()
+                except Exception:
+                    self._refresh_thread = None
+                    self._refresh_deadline = None
+                    self._refresh_first_request = None
+                    self._guesses_refreshing = False
+                    log.exception("failed to restart refresh-guesses worker")
+
+    @property
+    def guesses_epoch(self) -> int:
+        with self._refresh_sched_lock:
+            return self._guesses_epoch
+
+    @property
+    def guesses_refreshing(self) -> bool:
+        with self._refresh_sched_lock:
+            return self._guesses_refreshing
+
+    @property
+    def guesses_updated_ts(self) -> float:
+        with self._refresh_sched_lock:
+            return self._guesses_updated_ts
 
     def discard_unknown(self, uid: str):
         (self.unknown_dir / f"{uid}.json").unlink(missing_ok=True)

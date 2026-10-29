@@ -635,6 +635,11 @@ const FULL_WHY=()=>`Limit of ${maxFaces} reached. New faces still count: each on
 const countText=s=>{const n=persons[s].count;return `${n} photo${n===1?'':'s'}${full(s)?' · <span class="fullt">full</span>':n<10?' · <span class="warn-t">few</span>':''}`};
 const allFaces=()=>clusters.flat();
 const faceById=id=>allFaces().find(u=>u.id===id);
+function dropIds(ids){
+  const gone=new Set(ids);
+  clusters=clusters.map(c=>c.filter(u=>!gone.has(u.id))).filter(c=>c.length);
+  ids.forEach(id=>sel.delete(id));
+}
 const slugOfGuess=u=>u.guess_top_slug&&persons[u.guess_top_slug]?u.guess_top_slug:Object.keys(persons).find(s=>persons[s].name===u.guess)||null;
 
 /* ================= loading ================= */
@@ -713,13 +718,15 @@ function renderSort(){
       <span style="flex:1"></span>
       ${sugg.length?`<button class="b hot" id="applyAll">Apply ${sugg.length} suggestion${sugg.length>1?'s':''}</button>`:''}</div>
     <div class="cards">${cs.map(c=>{
-      const name=c.guess?esc(pname(c.guess)):'',open=openCards.has(c.key),many=c.faces.length>8;
-      const shown=open||!many?c.faces:c.faces.slice(0,7),slots=open?0:Math.max(0,8-shown.length-(many?1:0));
+      const PREVIEW=7, OPEN_MAX=24;
+      const name=c.guess?esc(pname(c.guess)):'',open=openCards.has(c.key),many=c.faces.length>PREVIEW;
+      const shown=open?c.faces.slice(0,OPEN_MAX):(many?c.faces.slice(0,PREVIEW):c.faces);
+      const slots=open?0:Math.max(0,8-shown.length-(many?1:0));
       const allSel=c.faces.every(u=>sel.has(u.id)),pct=Math.round(c.score*100);
       return `<article class="card k-${c.kind} ${open?'wide':''}" aria-label="${c.kind==='none'?'No match yet':name}">
         <header class="ch"><span class="who" title="${c.kind==='none'?'No match yet':name}"><small>${c.kind==='s'?'Suggested':c.kind==='m'?'Maybe':'Unknown'}</small>${c.kind==='none'?'No match yet':(c.kind==='s'?'→ ':'')+name}</span>
           <span class="ct">${c.kind!=='none'?`<span class="pct">up to ${pct}%</span>`:''}${c.faces.length} face${c.faces.length>1?'s':''} · ${esc(when(c.faces[0].event_ts||c.faces[0].ts))}</span></header>
-        <div class="cf">${shown.map(tile).join('')}${many&&!open?`<button class="more" data-expand="${esc(c.key)}" aria-label="Show all ${c.faces.length} faces">+${c.faces.length-7}</button>`:''}${'<span class="slot" aria-hidden="true"></span>'.repeat(slots)}</div>
+        <div class="cf">${shown.map(tile).join('')}${many&&!open?`<button class="more" data-expand="${esc(c.key)}" aria-label="Show more of ${c.faces.length} faces">+${c.faces.length-PREVIEW}</button>`:''}${open&&c.faces.length>OPEN_MAX?`<span class="more" title="Select all still includes every face">+${c.faces.length-OPEN_MAX}</span>`:''}${'<span class="slot" aria-hidden="true"></span>'.repeat(slots)}</div>
         <footer class="cft">${c.kind==='s'?`<button class="b hot" data-applycard="${esc(c.key)}">All to ${name}</button>`:''}
           <button class="sall" data-selcard="${esc(c.key)}" aria-pressed="${allSel}">${allSel?'Unselect':'Select all'}</button>
           ${open?`<button class="sall" data-expand="${esc(c.key)}">Show less</button>`:''}</footer>
@@ -763,6 +770,29 @@ function renderSel(){
     <button class="b" id="selDisc">Discard</button>
     <button class="b" id="selClr" aria-label="Clear selection">✕</button>`;
 }
+function syncSelUI(){
+  const cs=cards();
+  document.querySelectorAll('.f[data-f]').forEach(f=>f.setAttribute('aria-pressed', sel.has(f.dataset.f)?'true':'false'));
+  document.querySelectorAll('[data-selcard]').forEach(b=>{
+    const c=cs.find(x=>x.key===b.dataset.selcard); if(!c)return;
+    const all=c.faces.every(u=>sel.has(u.id));
+    b.setAttribute('aria-pressed', all);
+    b.textContent=all?'Unselect':'Select all';
+  });
+  const rh=document.querySelector('.rhead');
+  if(rh){
+    rh.classList.toggle('on', !!sel.size);
+    rh.innerHTML=sel.size?`<span><b>${sel.size} selected</b> · tap a person</span><button class="clr" id="railClr">Clear</button>`:'<span>People</span><span>key</span>';
+  }
+  document.querySelectorAll('.pile').forEach(p=>{
+    if(p.id==='newPile'||p.id==='unnamedPile'||p.id==='ignPile'||p.id==='discPile')return;
+    p.classList.toggle('armed', !!sel.size);
+  });
+  const np=document.querySelector('#newPile .mt');
+  if(np) np.textContent=sel.size?`Name ${sel.size} selected`:'Select faces first';
+  $('#navN').textContent=allFaces().length;
+  renderSel();
+}
 async function pollScan(){if(view!=='sort')return;bf=await api('api/backfill').catch(()=>bf);if(!bf?.running){await loadAll()}render()}
 function mintName(label){ /* "Unnamed-3fa2c1" — unique against existing names */
   const base=(label||'').trim().replace(/\s+/g,' ')||'Unnamed',taken=new Set(Object.values(persons).map(p=>p.name.normalize('NFKC').trim().toLowerCase()));
@@ -792,10 +822,10 @@ function diffPerson(slug,b){
 async function assign(person,ids=sel){
   ids=[...ids];if(!ids.length)return toast('Select faces first — tap them',false);if(busy)return;busy=true;
   const before=snapAll();
-  document.querySelectorAll('.f').forEach(f=>{if(ids.includes(f.dataset.f))f.classList.add('gone')});
+  dropIds(ids);render();
   try{
     const r=await api('api/unknowns/assign',{json:{ids,person}});
-    sel.clear();await loadAll();const slug=r.slug,d=diffPerson(slug,before[slug]||EMPTY);
+    await loadAll();const slug=r.slug,d=diffPerson(slug,before[slug]||EMPTY);
     recent[slug]=[...d.shown.reverse(),...(recent[slug]||[])].slice(0,3);landed=slug;render();landed=null;
     pushUndo(d.undo);
     const swapped=d.pushedOut.length+d.parked.length;
@@ -804,8 +834,9 @@ async function assign(person,ids=sel){
 }
 async function ignoreSel(ids=sel){
   ids=[...ids];if(!ids.length)return toast('Select faces first — tap them',false);if(busy)return;busy=true;
+  dropIds(ids);render();
   try{const prev=new Set((await api('api/ignored')).flat().map(x=>x.id));
-    const r=await api('api/unknowns/ignore',{json:{ids,person:'-'}});sel.clear();
+    const r=await api('api/unknowns/ignore',{json:{ids,person:'-'}});
     const now=(await api('api/ignored')).flat().map(x=>x.id).filter(id=>!prev.has(id));ignoredGroups=null;
     pushUndo(async()=>{if(now.length)await api('api/ignored/restore',{json:{ids:now,person:'-'}})});
     await loadAll();render();toast(`${r.ignored} face${r.ignored>1?'s':''} ignored — no more alerts for this person`);
@@ -1098,8 +1129,8 @@ document.addEventListener('click',async e=>{
   if(t.dataset.view){if(t.dataset.for){enr={name:pname(t.dataset.for),files:[],busy:false,result:null}}go(t.dataset.view);return}
   if(t.dataset.f){const id=t.dataset.f;
     if(e.shiftKey&&lastClick){const ids=cards().flatMap(c=>c.faces).map(u=>u.id),a=ids.indexOf(lastClick),b=ids.indexOf(id);ids.slice(Math.min(a,b),Math.max(a,b)+1).forEach(x=>sel.add(x))}
-    else sel.has(id)?sel.delete(id):sel.add(id);lastClick=id;renderSort();document.querySelector(`[data-f="${CSS.escape(id)}"]`)?.focus();return}
-  if(t.dataset.selcard){const c=cards().find(x=>x.key===t.dataset.selcard),all=c.faces.every(u=>sel.has(u.id));c.faces.forEach(u=>all?sel.delete(u.id):sel.add(u.id));renderSort();document.querySelector(`[data-selcard="${CSS.escape(c.key)}"]`)?.focus();return}
+    else sel.has(id)?sel.delete(id):sel.add(id);lastClick=id;syncSelUI();document.querySelector(`[data-f="${CSS.escape(id)}"]`)?.focus();return}
+  if(t.dataset.selcard){const c=cards().find(x=>x.key===t.dataset.selcard),all=c.faces.every(u=>sel.has(u.id));c.faces.forEach(u=>all?sel.delete(u.id):sel.add(u.id));syncSelUI();document.querySelector(`[data-selcard="${CSS.escape(c.key)}"]`)?.focus();return}
   if(t.dataset.expand){const k=t.dataset.expand;openCards.has(k)?openCards.delete(k):openCards.add(k);renderSort();return}
   if(t.dataset.applycard){const c=cards().find(x=>x.key===t.dataset.applycard);return applyCards([c])}
   if(t.dataset.pile){return assign(t.dataset.pile)}
@@ -1142,7 +1173,7 @@ document.addEventListener('click',async e=>{
     case 'ignPile':case 'selIgn':return ignoreSel();
     case 'discPile':case 'selDisc':return discardSel();
     case 'selSnap':return openSnap();
-    case 'selClr':case 'railClr':sel.clear();renderSort();return;
+    case 'selClr':case 'railClr':sel.clear();syncSelUI();return;
     case 'allPeople':case 'selMore':return openPicker(sel);
     case 'lbMore':{const id=window._snap;$('#lbDlg').close();return openPicker(new Set([id]))}
     case 'pkNew':{const ids=pickIds,q=$('#pkQ').value.trim();if(!q){$('#pkQ').focus();return toast('Type the new name in the search field',false)}$('#pickDlg').close();
