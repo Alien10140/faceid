@@ -78,6 +78,9 @@ class Gallery:
         self._guesses_epoch = 0
         self._guesses_refreshing = False
         self._guesses_updated_ts = 0.0
+        self._unk_ui = None
+        self._unk_ui_lock = threading.Lock()
+        self._unk_pending = set()
         self._cache = {}  # slug -> {"name":..., "emb": np.ndarray, "files": [...]}
         self._ign_emb = np.zeros((0, 512), dtype=np.float32)
         self._ign_ids: list[str] = []
@@ -900,6 +903,7 @@ class Gallery:
             self._ign_emb = np.vstack([self._ign_emb, np.array(meta["embedding"], dtype=np.float32)[None, :]])
             self._ign_ids.append(iid)
             self._ign_groups.append(grp)
+            self.invalidate_unk_ui()
             return True
 
     def ignore_person(self, slug: str) -> int:
@@ -1057,7 +1061,62 @@ class Gallery:
                 cv2.imwrite(str(self.unknown_dir / f"{uid}_full.jpg"), full_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
             meta = dict(meta, ts=now, embedding=[round(float(v), 6) for v in embedding])
             (self.unknown_dir / f"{uid}.json").write_text(json.dumps(meta, ensure_ascii=False))
+            self.invalidate_unk_ui()
             return uid
+
+
+    _UNK_UI_KEYS = ("camera", "event_id", "event_ts", "guess", "guess_score",
+                    "guess_top_photo", "guess_top_slug", "ts", "extra_face")
+
+    def invalidate_unk_ui(self):
+        with self._unk_ui_lock:
+            self._unk_ui = None
+
+    def hide_unk_ui(self, ids):
+        """Drop ids from the Sort-board cache before the worker has moved the files."""
+        pending = {str(i) for i in ids}
+        with self._unk_ui_lock:
+            self._unk_pending.update(pending)
+            if self._unk_ui is not None:
+                self._unk_ui = [row for row in self._unk_ui if row["id"] not in self._unk_pending]
+
+    def unhide_unk_ui(self, ids):
+        pending = {str(i) for i in ids}
+        with self._unk_ui_lock:
+            self._unk_pending.difference_update(pending)
+            self._unk_ui = None
+
+    def unknowns_for_ui(self):
+        """Review list without embeddings or DBSCAN — what the Sort board actually paints."""
+        with self._unk_ui_lock:
+            if self._unk_ui is None:
+                self._unk_ui = [row for row in self._read_unk_ui()
+                                if row["id"] not in self._unk_pending]
+            return [dict(row) for row in self._unk_ui]
+
+    def review_queue_len(self):
+        n = sum(1 for _ in self.unknown_dir.glob("*.json"))
+        with self._unk_ui_lock:
+            return max(0, n - len(self._unk_pending))
+
+    def assign_pending_len(self):
+        with self._unk_ui_lock:
+            return len(self._unk_pending)
+
+    def _read_unk_ui(self):
+        out = []
+        for jf in sorted(self.unknown_dir.glob("*.json"), reverse=True):
+            try:
+                m = json.loads(jf.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+            row = {"id": jf.stem,
+                   "has_full": (self.unknown_dir / f"{jf.stem}_full.jpg").exists()}
+            for k in self._UNK_UI_KEYS:
+                if k in m:
+                    row[k] = m[k]
+            out.append(row)
+        return out
 
     def unknowns(self):
         out = []
@@ -1099,6 +1158,7 @@ class Gallery:
         jf.unlink()
         img_f.unlink()
         (self.unknown_dir / f"{uid}_full.jpg").unlink(missing_ok=True)
+        self.invalidate_unk_ui()
         return True
 
     def refresh_guesses(self):
@@ -1184,6 +1244,7 @@ class Gallery:
                 raise
         if changed:
             self._fsync_unknown_dir()
+            self.invalidate_unk_ui()
         with self._refresh_sched_lock:
             if changed:
                 self._guesses_epoch += 1
@@ -1307,3 +1368,4 @@ class Gallery:
         (self.unknown_dir / f"{uid}.json").unlink(missing_ok=True)
         (self.unknown_dir / f"{uid}.jpg").unlink(missing_ok=True)
         (self.unknown_dir / f"{uid}_full.jpg").unlink(missing_ok=True)
+        self.invalidate_unk_ui()

@@ -12,6 +12,12 @@ update dialog; standalone users can watch GitHub releases.
   ignore drop those ids from the cached queue immediately; rematch of the rest is
   the existing background pass, and Frigate `sub_label` posts no longer hold the
   handler. Contributed by @Alien10140.
+- **Sort board stays usable while you work.** Reload uses a flat cached review list
+  (`/api/unknowns?flat=1`; DBSCAN stays on `/classic`). Assign returns after enqueue
+  so enrolment does not freeze the tab; the wait cursor is gone. Suggested and Maybe
+  cards show the gallery reference face. **Track as new** on the New person form mints
+  `Label-xxxxxx`. The bottom selection bar stays visible with the people rail on
+  screen, so Discard does not require scrolling. Contributed by @Alien10140.
 
 ## 0.27.1 — 2026-10-27
 

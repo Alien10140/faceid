@@ -1,6 +1,7 @@
 """Assign must not block on a full-queue rematch; unchanged guesses stay on disk."""
 import json
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -147,11 +148,44 @@ class AssignDoesNotBlockRefreshTests(unittest.TestCase):
         r = self.assign(AssignBody(ids=[uid], person=slug))
         self.assertEqual(r["assigned"], 1)
         self.assertEqual(r["ids"], [uid])
+        self.assertTrue(r.get("queued"))
         self.assertNotIn("sync", called,
                          "assign must not run refresh_guesses on the handler thread")
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            if (self.gallery.guesses_refreshing
+                    or self.gallery._refresh_deadline is not None
+                    or (self.gallery._refresh_thread and self.gallery._refresh_thread.is_alive())
+                    or not (self.gallery.unknown_dir / f"{uid}.json").exists()):
+                break
+            time.sleep(0.03)
         self.assertTrue(r.get("guesses_refreshing") or self.gallery.guesses_refreshing
                         or self.gallery._refresh_deadline is not None
-                        or (self.gallery._refresh_thread and self.gallery._refresh_thread.is_alive()))
+                        or (self.gallery._refresh_thread and self.gallery._refresh_thread.is_alive())
+                        or not (self.gallery.unknown_dir / f"{uid}.json").exists())
+
+    def test_assign_returns_before_enrolment_and_hides_the_face(self):
+        slug = self.gallery.create_person("Juli")
+        uid = self._save_unknown()
+        gate = threading.Event()
+        orig = self.gallery.assign_unknown
+        def blocked(uid_, slug_):
+            gate.wait(2)
+            return orig(uid_, slug_)
+        self.gallery.assign_unknown = blocked
+        t0 = time.perf_counter()
+        r = self.assign(AssignBody(ids=[uid], person=slug))
+        dt = time.perf_counter() - t0
+        self.assertTrue(r.get("queued"))
+        self.assertLess(dt, 0.25, f"assign waited on enrolment ({dt:.3f}s)")
+        ids = {row["id"] for row in self.gallery.unknowns_for_ui()}
+        self.assertNotIn(uid, ids)
+        self.assertGreaterEqual(self.health()["assign_queued"], 1)
+        gate.set()
+        deadline = time.time() + 2.0
+        while time.time() < deadline and (self.gallery.unknown_dir / f"{uid}.json").exists():
+            time.sleep(0.03)
+        self.assertFalse((self.gallery.unknown_dir / f"{uid}.json").exists())
 
     def test_auto_assign_does_not_rematch_twice_on_the_handler(self):
         slug = self.gallery.create_person("Juli")
@@ -188,6 +222,8 @@ class AssignDoesNotBlockRefreshTests(unittest.TestCase):
         self.assertIsInstance(h["guesses_refreshing"], bool)
         self.assertIn("sub_label_failures", h)
         self.assertEqual(h["sub_label_failures"], 0)
+        self.assertIn("assign_queued", h)
+        self.assertEqual(h["assign_queued"], 0)
 
 
 class SubLabelOffHandlerClockTests(unittest.TestCase):
@@ -300,6 +336,9 @@ class ReviewFollowUpTests(unittest.TestCase):
             crop, _emb(), {"camera": "entrance", "event_id": "evt-none"})
         r = assign(AssignBody(ids=[uid], person=slug))
         self.assertEqual(r["assigned"], 1)
+        deadline = time.time() + 2.0
+        while time.time() < deadline and (gallery.unknown_dir / f"{uid}.json").exists():
+            time.sleep(0.03)
 
 
 if __name__ == "__main__":

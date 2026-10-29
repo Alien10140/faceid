@@ -97,6 +97,36 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         return {"guesses_epoch": gallery.guesses_epoch,
                 "guesses_refreshing": gallery.guesses_refreshing}
 
+    assign_q: queue.Queue = queue.Queue()
+
+    def _assign_loop():
+        while True:
+            job = assign_q.get()
+            ids, slug, name, created_now = job
+            assigned = 0
+            try:
+                for uid in ids:
+                    jf = gallery.unknown_dir / f"{uid}.json"
+                    meta = {}
+                    if jf.exists():
+                        try:
+                            meta = json.loads(jf.read_text())
+                        except (json.JSONDecodeError, OSError):
+                            pass
+                    if gallery.assign_unknown(uid, slug):
+                        assigned += 1
+                        _enqueue_sub_label(meta.get("event_id"), name, 1.0)
+                if assigned:
+                    gallery.request_refresh_guesses()
+                elif created_now:
+                    gallery.delete_person(slug)
+            except Exception:
+                log.exception("background assign failed")
+            finally:
+                gallery.unhide_unk_ui(ids)
+
+    threading.Thread(target=_assign_loop, daemon=True, name="faceid-assign").start()
+
     if (static_dir / "assets").is_dir():
         # Schriften und Logo der Oberflaeche — lokal, damit die App nichts von aussen nachlaedt.
         app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
@@ -328,17 +358,27 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
             added += 1
         return {"added": added, "skipped": skipped}
 
-    @app.get("/api/unknowns")
-    def unknowns():
-        clusters = gallery.unknown_clusters(eps=float(cfg["faceid"].get("cluster_eps", 0.45)))
+    def _decorate_unknowns(items):
         frigate_url = _frigate_url(cfg)
+        for u in items:
+            if u.pop("has_full", False):
+                u["full_url"] = f"data/unknowns/{u['id']}_full.jpg"
+            elif frigate_url and u.get("event_id"):
+                # Backfill-Bestand: Vollbild live aus Frigate (solange Event-Retention reicht)
+                u["full_url"] = f"{frigate_url}/api/events/{u['event_id']}/snapshot.jpg"
+
+    @app.get("/api/unknowns")
+    def unknowns(flat: bool = False):
+        # The 0.27 Sort board groups by guess in the browser. DBSCAN on a few
+        # thousand embeddings is only for /classic, and it is what made reload sit
+        # on "Loading…" for tens of seconds.
+        if flat:
+            items = gallery.unknowns_for_ui()
+            _decorate_unknowns(items)
+            return JSONResponse([items] if items else [])
+        clusters = gallery.unknown_clusters(eps=float(cfg["faceid"].get("cluster_eps", 0.45)))
         for c in clusters:
-            for u in c:
-                if u.pop("has_full", False):
-                    u["full_url"] = f"data/unknowns/{u['id']}_full.jpg"
-                elif frigate_url and u.get("event_id"):
-                    # Backfill-Bestand: Vollbild live aus Frigate (solange Event-Retention reicht)
-                    u["full_url"] = f"{frigate_url}/api/events/{u['event_id']}/snapshot.jpg"
+            _decorate_unknowns(c)
         return JSONResponse(clusters)
 
     @app.post("/api/unknowns/assign")
@@ -351,21 +391,12 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         # bei null Treffern eine bestehende Person samt ihrer Gesichter.
         created_now = slug not in persons_now
         name = gallery.persons()[slug]["name"]
-        assigned_ids = []
+        existing = []
         for uid in body.ids:
-            jf = gallery.unknown_dir / f"{uid}.json"
-            meta = {}
-            if jf.exists():
-                try:
-                    meta = json.loads(jf.read_text())
-                except (json.JSONDecodeError, OSError):
-                    pass
-            if gallery.assign_unknown(uid, slug):
-                assigned_ids.append(uid)
-                # Zuordnung ans Original-Event zurückspielen (Mensch bestätigt -> Score 1.0)
-                _enqueue_sub_label(meta.get("event_id"), name, 1.0)
-        n = len(assigned_ids)
-        if n == 0:
+            if ((gallery.unknown_dir / f"{uid}.json").exists()
+                    and (gallery.unknown_dir / f"{uid}.jpg").exists()):
+                existing.append(uid)
+        if not existing:
             # Kein Gesicht gelandet heisst: veraltete IDs, leere Auswahl, oder ein
             # zweiter Tab war schneller. Das war bisher ein HTTP 200 mit
             # {"assigned": 0} — die Oberflaeche meldete "0 face(s) → Name" und sah aus
@@ -377,8 +408,13 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
                 gallery.delete_person(slug)
                 raise HTTPException(409, f"no face was assigned — {name} was not created")
             raise HTTPException(409, "no face was assigned — the queue may have changed")
-        gallery.request_refresh_guesses()
-        return {"assigned": n, "slug": slug, "ids": assigned_ids, **_guess_flags()}
+        # Enrolment (cv2 + gallery rewrite) stays off the request clock so the
+        # Sort board can keep taking clicks. Files are hidden from the UI cache
+        # until the worker has moved them.
+        gallery.hide_unk_ui(existing)
+        assign_q.put((existing, slug, name, created_now))
+        return {"assigned": len(existing), "slug": slug, "ids": existing,
+                "queued": True, **_guess_flags()}
 
     @app.post("/api/unknowns/auto_assign")
     def auto_assign():
@@ -865,7 +901,8 @@ def build_app(cfg, engine, gallery, processor, data_dir: Path, static_dir: Path)
         # Verarbeitungs-Warteschlange steht separat unter "processing".
         folder = getattr(processor, "folder_ingest", None)
         return {"status": "ok", "persons": len(gallery.persons()),
-                "queue": len(list((data_dir / "unknowns").glob("*.json"))),
+                "queue": gallery.review_queue_len(),
+                "assign_queued": gallery.assign_pending_len(),
                 "processing": processor.queue.qsize(),
                 "open_events": len(processor.events),
                 "source": "folder" if folder and folder.enabled else "frigate",
